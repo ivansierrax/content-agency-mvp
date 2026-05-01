@@ -11,6 +11,7 @@ export interface Env {
   SUPABASE_PUBLISHABLE_KEY: string;
   SUPABASE_SECRET_KEY: string;
   ANTHROPIC_API_KEY: string;
+  MASTER_ENCRYPTION_KEY: string;
   PORT: number;
 }
 
@@ -41,6 +42,7 @@ export function loadEnv(): Env {
     SUPABASE_PUBLISHABLE_KEY: required('SUPABASE_PUBLISHABLE_KEY'),
     SUPABASE_SECRET_KEY: required('SUPABASE_SECRET_KEY'),
     ANTHROPIC_API_KEY: required('ANTHROPIC_API_KEY'),
+    MASTER_ENCRYPTION_KEY: required('MASTER_ENCRYPTION_KEY'),
     PORT: Number(optional('PORT', '3000')),
   };
 }

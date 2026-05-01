@@ -14,6 +14,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { loadEnv } from './lib/env.js';
 import { initSentry, captureException, flushSentry } from './lib/sentry.js';
+import { checkDbHealth } from './lib/supabase.js';
+import { listBrands } from './db/brands.js';
 
 const env = loadEnv();
 initSentry(env);
@@ -35,16 +37,41 @@ async function handleRoot(_req: IncomingMessage, res: ServerResponse): Promise<v
 }
 
 async function handleHealth(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // Day 9 will replace this with per-brand status from Supabase.
-  // For now: just confirms the service is responsive and Sentry is initialized.
-  res.writeHead(200, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({
-    status: 'ok',
+  const checks: Record<string, unknown> = {
     sentryEnabled: Boolean(env.SENTRY_DSN),
     nodeVersion: process.version,
     timestamp: new Date().toISOString(),
-    brands: [], // TODO Day 6: list active brand statuses
-  }));
+  };
+
+  // DB connectivity + per-brand summary. Each section degrades gracefully — a DB
+  // outage flips status to 'degraded' but the endpoint still answers.
+  let status: 'ok' | 'degraded' = 'ok';
+
+  try {
+    const dbHealth = await checkDbHealth();
+    checks.db = dbHealth;
+  } catch (err) {
+    status = 'degraded';
+    checks.db = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    captureException(err, { source: 'health-check-db' });
+  }
+
+  try {
+    const brands = await listBrands();
+    checks.brands = brands.map((b) => ({
+      slug: b.slug,
+      name: b.name,
+      status: b.status,
+    }));
+    checks.brandCount = brands.length;
+  } catch (err) {
+    status = 'degraded';
+    checks.brands = { error: err instanceof Error ? err.message : String(err) };
+    captureException(err, { source: 'health-check-brands' });
+  }
+
+  res.writeHead(status === 'ok' ? 200 : 503, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ status, ...checks }));
 }
 
 async function handleThrow(_req: IncomingMessage, res: ServerResponse): Promise<void> {
