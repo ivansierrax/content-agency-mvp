@@ -94,3 +94,29 @@
 - Move only Publisher to Node — possible but not in MVP scope; Publisher is a known-good unit
 
 **Status:** Active.
+
+## D-008 — Per-brand secret encryption: app-level AES-256-GCM
+
+**Date:** 2026-05-01
+**Decision:** Encrypt per-brand secrets (IG long-lived tokens, Notion DB IDs, GA tokens, future LinkedIn tokens) with **AES-256-GCM at the application layer** using a single `MASTER_ENCRYPTION_KEY` env var on Railway. Ciphertext stored as `bytea` in Supabase. Stored format: `iv (12 bytes) || ciphertext || authTag (16 bytes)`, base64-encoded for Postgres-friendliness in `text` columns; binary `bytea` for true blob columns. Helper module: `src/lib/crypto.ts` exports `encrypt(plaintext: string): string` and `decrypt(ciphertext: string): string`.
+
+**Why:**
+- Database never sees the encryption key OR the plaintext — DB compromise alone yields only ciphertext (vs. `pgcrypto` where the key must be passed in at query time, exposing both via query logs / replication / backups).
+- Decryption logic centralized in one Node module → easy to test, easy to audit, easy to swap.
+- Keeps Supabase a "dumb store" — no Postgres extension dependency, painless to migrate to a different DB if needed.
+- Node's built-in `crypto` module is sufficient (no extra deps).
+
+**Risk acknowledged:** If the Railway env leaks (`MASTER_ENCRYPTION_KEY` exposed), all per-brand secrets decryptable. Same risk class as `pgcrypto` with a key-in-env strategy — neither approach escapes it.
+
+**Alternatives rejected:**
+- **`pgcrypto` (DB-side)** — exposes both key and plaintext to the DB layer; tighter coupling to Postgres.
+- **AWS KMS / GCP KMS / HashiCorp Vault** — the *correct* upgrade path post-MVP. Keys never touch our env, decrypt happens via signed API call. Skipped for MVP because adding a third-party dependency on Day 2 burns ~half a day for marginal week-1 benefit. Worth doing once we have ≥3 paying brands.
+
+**Operational notes:**
+- `MASTER_ENCRYPTION_KEY` must be 32 bytes (AES-256). Generate via `openssl rand -base64 32` → ~44-char base64 string. Decoded inside Node.
+- Rotation procedure (when needed): mint new key → re-encrypt all `brand_configs` rows in a migration script → cut over env var → revoke old key. Doable but downtime-flavored; design for it but don't automate in MVP.
+- IV must be unique per encryption (use `crypto.randomBytes(12)`). Never reuse an IV with the same key.
+
+**Post-MVP upgrade path:** AWS KMS or GCP KMS — replace `MASTER_ENCRYPTION_KEY` with a KMS key ARN; `encrypt`/`decrypt` become async API calls. Schema unchanged.
+
+**Status:** Active.
