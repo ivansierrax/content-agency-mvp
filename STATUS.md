@@ -1,10 +1,10 @@
 # STATUS — content_agency_mvp
 
-**Day 0 (2026-04-30 evening) — PLANNING + PRE-FLIGHT COMPLETE**
+**Day 1 (2026-04-30 night) — BOOTSTRAP HALFWAY (repo + scaffold pushed; Railway deploy pending)**
 
 ## Where we are
 
-Planning + scaffolding done. Ready to start Day 1 (Bootstrap) on next session.
+Day 1 partially complete. TypeScript scaffold pushed to GitHub. Railway deploy + Sentry smoke verification still pending — those are the morning of Day 2.
 
 ## What we have
 
@@ -16,14 +16,29 @@ Planning + scaffolding done. Ready to start Day 1 (Bootstrap) on next session.
 - ✅ Operating posture installed globally (`~/.claude/CLAUDE.md` Operating posture section, 2026-04-30)
 - ✅ Existing pipeline audit complete (`n8n_audit_2026-04-30.md`)
 - ✅ 27 dead n8n workflows archived
+- ✅ Pre-flight: Supabase + Railway + Sentry projects provisioned, all credentials in `CREDENTIALS.md`
+- ✅ TypeScript project initialized (Node 20+, strict mode, ES2022, NodeNext)
+- ✅ `src/index.ts` entry with Sentry init + `--throw` smoke flag
+- ✅ `src/lib/env.ts` validated env loader (fails loud on missing vars)
+- ✅ `src/lib/sentry.ts` Sentry wrapper + brand-context tagging helper
+- ✅ `.github/workflows/ci.yml` — typecheck on PR/main
+- ✅ npm install — 76 packages, 0 vulnerabilities
+- ✅ TypeScript compiles clean (`npm run typecheck` passes)
+- ✅ GitHub repo created + initial commit pushed: https://github.com/ivansierrax/content-agency-mvp
+- ✅ `gh` CLI installed + authenticated with `repo` + `workflow` scopes
+- ✅ Local git → GitHub origin wired (HTTPS via gh credential helper)
 
 ## What we don't have yet
 
-- ⚪ Repo not initialized
-- ⚪ Supabase / Railway / Sentry projects not created
-- ⚪ Zero TypeScript code written
-- ⚪ No Brand 0 row in Postgres
-- ⚪ No multi-brand testing yet
+- ⚪ Railway not yet linked to GitHub repo (no deploy yet)
+- ⚪ No Railway env vars set (SUPABASE_URL / KEYS / ANTHROPIC_API_KEY / SENTRY_DSN)
+- ⚪ No Sentry capture verified end-to-end (will run `npm run smoke -- --throw` on Railway)
+- ⚪ No Brand 0 row in Postgres (Day 2 — schema migration not started)
+- ⚪ Anthropic SDK not yet wired (`src/lib/anthropic.ts` not created — Day 3)
+- ⚪ Supabase SDK not yet wired (`src/lib/supabase.ts` not created — Day 2)
+- ⚪ Pipeline modules not started (Day 3+)
+- ⚪ Designer not started (Day 4)
+- ⚪ Notion sync not started (Day 5)
 
 ## Health
 
@@ -31,8 +46,8 @@ Planning + scaffolding done. Ready to start Day 1 (Bootstrap) on next session.
 |---|---|
 | Plan | 🟢 complete |
 | Architecture | 🟢 decided |
-| Code | ⚪ not started |
-| Infrastructure | 🟡 accounts provisioned, projects created, no code deployed |
+| Code | 🟡 scaffold + entry point + Sentry/env wiring |
+| Infrastructure | 🟡 SaaS provisioned, repo on GitHub, CI configured, Railway not yet deployed |
 | First brand onboarded | ⚪ Day 10 target |
 | Live with paying brand | ⚪ Day 11-14 target |
 
@@ -53,8 +68,8 @@ All credentials in `CREDENTIALS.md`.
 
 ## Last session
 
-**2026-04-30 evening (Session 0 — Planning):** Reframed scope from "migrate Hashtag's pipeline" to "multi-tenant content agency platform MVP for paying SMB clients." Locked 2-week timeline with cuts (IG-only, no learning loop in MVP). Architecture decided. Project scaffolding live. See SESSION_LOG.md for detail.
+**2026-04-30 night (Session 1 — Day 1 bootstrap halfway):** Provisioned all 4 SaaS accounts. Built TypeScript scaffold. Pushed initial commit to GitHub. Pending: Railway link/deploy + Sentry smoke verification. See SESSION_LOG.md for detail.
 
 ## Next session
 
-**Day 1 (Bootstrap).** See `TODO.md` "Right now" section. Resume with `[MVP] resume`.
+**Day 1 finish + Day 2 start.** Resume with `[MVP] resume`. First action: link Railway to GitHub repo, set env vars from CREDENTIALS.md, trigger first deploy, run `--throw` smoke and verify Sentry captures it.

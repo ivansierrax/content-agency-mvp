@@ -3,20 +3,23 @@
 > Session-level next-actions. Updates every session.
 > For the locked 14-day plan, see `PLAN.md`.
 
-## Right now (Day 1 — Bootstrap)
+## Right now (Day 1 finish — Railway deploy + Sentry smoke)
 
 1. [x] Pre-flight done — all 4 services provisioned (see CREDENTIALS.md)
-2. [ ] Init `content_agency_mvp/` as TypeScript project (npm init -y, tsconfig.json, src/, tests/)
-3. [ ] Create GitHub repo `hashtagagencia/content_agency_mvp` (private)
-4. [ ] Create Supabase project, capture URL + service-role key
-5. [ ] Create Railway project, link GitHub repo
-6. [ ] Create Sentry project, capture DSN
-7. [ ] Configure GitHub Actions: typecheck + test on PR
-8. [ ] Port `content_pipeline/eval/run.mjs` → `src/pipeline/run.ts` (relocate + TS, no logic change)
-9. [ ] First Railway deploy: `npm start` runs eval against a SMOKE-S57 fixture
-10. [ ] Verify: trigger an error → see it in Sentry within 30s
+2. [x] Init `content_agency_mvp/` as TypeScript project (npm init, tsconfig, src/index.ts, src/lib/env.ts, src/lib/sentry.ts)
+3. [x] Create GitHub repo `ivansierrax/content-agency-mvp` (private) + initial commit pushed
+4. [x] Supabase project provisioned (Day 0)
+5. [x] Railway project provisioned (Day 0) — but NOT yet linked to GitHub
+6. [x] Sentry project provisioned + DSN captured (Day 0)
+7. [x] Configure GitHub Actions: typecheck on PR/main
+8. [ ] Link Railway project to GitHub `ivansierrax/content-agency-mvp` repo
+9. [ ] Set Railway env vars from CREDENTIALS.md: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `ANTHROPIC_API_KEY` (TBD — Day 2 will create dedicated key for cost tracking), `SENTRY_DSN`, `SENTRY_ENVIRONMENT=production`, `NODE_ENV=production`
+10. [ ] Add Railway start command: probably needs Procfile (`web: npm run start`) or railway.json + a build step (`npm run build` to produce dist/index.js)
+11. [ ] First Railway deploy (push to main triggers it once GitHub is linked; may need manual trigger first time)
+12. [ ] Verify: run `npm run smoke -- --throw` on Railway → see error in Sentry within 30s
+13. [ ] Port `content_pipeline/eval/run.mjs` → `src/eval/run.ts` (DEFERRED to Day 2-3 — Day 1's smoke is the boot, port is downstream)
 
-**Day 1 done = repo deploys to Railway, eval runs in container, Sentry captures errors.**
+**Day 1 done = Railway boot+throw test lights up Sentry dashboard.** Until we see that error, Day 1 isn't truly closed.
 
 ## This week (Week 1 — rest of)
 

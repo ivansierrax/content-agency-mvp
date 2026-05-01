@@ -5,6 +5,62 @@
 
 ---
 
+## 2026-04-30 night — Session 1 (Day 1 bootstrap, partial)
+
+**Duration:** ~75 min after pre-flight wrap.
+
+**What happened:**
+
+1. **TypeScript scaffold built.** package.json (Node 20+, ES module, scripts: build/start/dev/smoke/typecheck), tsconfig.json (strict, ES2022, NodeNext), .gitignore (excludes node_modules, dist, .env*, CREDENTIALS.md), .env.example (template), README.md (project intro + layout), .github/workflows/ci.yml (typecheck on PR/main), src/index.ts entry point, src/lib/env.ts (validated env loader), src/lib/sentry.ts (init wrapper + brand-context tagging).
+
+2. **`npm install` clean.** 76 packages, 0 vulnerabilities. `@anthropic-ai/sdk@^0.32.1`, `@sentry/node@^8.42.0`, `@supabase/supabase-js@^2.46.1`, devDeps: tsx + typescript + @types/node.
+
+3. **TypeScript compiles clean.** `npm run typecheck` zero errors.
+
+4. **Initial commit + GitHub push.** Repo: https://github.com/ivansierrax/content-agency-mvp (private). Initial commit hash captured in git log.
+
+5. **`gh` CLI installed.** `brew install gh` (Homebrew 5.1.8) → `gh auth login --hostname github.com --git-protocol https --web` → first round only had `gist`, `read:org`, `repo` scopes → push rejected for `.github/workflows/ci.yml` without `workflow` scope → `gh auth refresh -s workflow` → second OAuth round granted workflow scope → `git push -u origin main` succeeded.
+
+**What's not done (deferred to next session):**
+
+- Railway linked to GitHub repo + env vars set + first deploy
+- Sentry smoke verification (run `--throw` flag on Railway, see error in Sentry within 30s)
+- This is what closes Day 1
+
+**Lessons learned (consider promoting to feedback memory):**
+
+- `gh` CLI's default scope from `gh auth login` is `gist + read:org + repo`. To push files under `.github/workflows/`, must run `gh auth refresh -s workflow` afterward. The lock-step "first time? refresh scope" is a one-time tax — can be combined into single `gh auth login -s workflow` next time.
+- GitHub MCP's PAT lacks `repo` scope for personal-account repo creation — got `403 Resource not accessible by personal access token`. Workaround: use `gh` CLI or have user create repo manually. Adding the right scope to MCP's PAT would future-proof this.
+- npm install in Dropbox folder seems fine (no obvious slowdown despite Dropbox sync). Watch for if it becomes an issue with larger node_modules later.
+
+**What's next:**
+
+- Day 1 finish: link Railway → GitHub, set env vars, trigger first deploy, smoke-test Sentry.
+- Resume next session with `[MVP] resume`.
+
+**Blockers:** None — just waiting on Railway dashboard work next session.
+
+**New decisions logged:** None new.
+
+**New files this session:**
+- `content_agency_mvp/package.json`, `tsconfig.json`, `.gitignore`, `.env.example`, `README.md`
+- `content_agency_mvp/src/index.ts`
+- `content_agency_mvp/src/lib/env.ts`, `src/lib/sentry.ts`
+- `content_agency_mvp/.github/workflows/ci.yml`
+- `content_agency_mvp/package-lock.json` (npm install)
+- `content_agency_mvp/.git/` (local git repo)
+
+**Files updated this session:**
+- `content_agency_mvp/STATUS.md` (Day 1 halfway state)
+- `content_agency_mvp/TODO.md` (Day 1 done items checked, Day 1 finish items surfaced)
+
+**External state changes:**
+- GitHub: new private repo `ivansierrax/content-agency-mvp` with initial commit
+- gh CLI: authenticated with `gist`, `read:org`, `repo`, `workflow` scopes (keychain-stored)
+- Local git: configured (user.email=ivan@hashtag.com.mx, user.name="Ivan Sierra"), origin set to GitHub HTTPS
+
+---
+
 ## 2026-04-30 late-evening — Session 0.5 (Pre-flight)
 
 **Duration:** ~45 min after Session 0 wrap.
