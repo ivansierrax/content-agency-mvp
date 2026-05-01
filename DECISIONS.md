@@ -162,6 +162,31 @@ A `POST /admin/refresh-brand/:slug` endpoint forces an immediate sync — used b
 
 **Status:** Active. Sync job implementation = Day 5.
 
+## D-012 — Grounding check operates on `anchor_claims`, not on re-normalized source text
+
+**Date:** 2026-05-01
+**Decision:** The pre-Phase-A regex grounding check from the existing n8n QG (`Extract Reviews` node) is **NOT** ported to the Node service. It is replaced with a check that operates on `anchor_claims.numeric_claims[].value` — the already-extracted, already-verified data — rather than re-fetching the source text and re-normalizing.
+
+**Why (root cause confirmed today as BUG-S58-5):** the existing implementation has a P1 asymmetric-normalization bug. The corpus normalize collapses `","` and whitespace to a single space (`"65,000"` → `"65 000"`), while the number needle strips `","` and whitespace entirely (`"65,000"` → `"65000"`). `corpus.includes(needle)` never matches for any number ≥1,000 written with thousand-separator commas. Real, source-anchored numeric claims get false-flagged as fabricated → Corrector replaces them with vague language → Phase A correctly kills the vague language → `failure_category: thin_source` on a data-rich source. Silent cascade. Patched in n8n today (single-line fix), but the broader lesson is that the entire re-fetch-and-re-normalize architecture is unnecessary and bug-prone.
+
+**The new contract:**
+1. **Strategist** extracts claims from source via Sonnet (with `cache_control: ephemeral`) and runs a **substring verifier** (D-008's defense-in-depth): every `numeric_claims[].value` and `direct_quotes[].quote` MUST appear verbatim in source text after normalization, else dropped.
+2. **Writer** drafts using `anchor_claims` as the only fact surface (verbatim from existing Writer prompt's Rule B).
+3. **Pre-Phase-A grounding check** operates on `anchor_claims.numeric_claims[].value` directly: extract numbers from draft, for each verify membership in the anchor list. No re-fetch. No re-normalization. Number formatting normalization is done ONCE inside a single helper that's used identically on both sides of the comparison.
+4. **Phase A LLM check** stays as final defense (Sonnet sees draft + anchor_claims). Behavior preserved verbatim from existing.
+
+**Why this is structurally better:**
+- Anchor_claims is the single source of truth for grounding — already filtered, already verified by step 1's substring verifier. Re-fetching source is wasted work that introduces a second normalization surface where bugs hide.
+- One normalization helper used on both sides eliminates the BUG-S58-5 pattern by construction. There's no place for two normalize functions to drift.
+- Performance: no per-post Jina re-fetch (~1s saved per post on the QG path).
+- Resilience: source URL becoming unreachable doesn't break grounding — anchor_claims persists in `post_queue.payload`.
+
+**Alternatives rejected:**
+- **Port the existing regex pre-flight verbatim with the BUG-S58-5 single-line fix** — would carry forward the brittle architecture even if the immediate bug is patched. Two normalize-fns will drift again under future edits.
+- **Skip the pre-flight check entirely; rely on Phase A only** — viable, but pre-flight catches a meaningful class of bugs cheaply. Worth keeping a deterministic check before the LLM-vs-LLM check.
+
+**Status:** Active. To be implemented as `src/pipeline/grounding.ts` in Day 3.
+
 ## D-011 — IG token rotation deferred to Day 7 evening (atomic session)
 
 **Date:** 2026-05-01
