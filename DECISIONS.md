@@ -120,3 +120,57 @@
 **Post-MVP upgrade path:** AWS KMS or GCP KMS — replace `MASTER_ENCRYPTION_KEY` with a KMS key ARN; `encrypt`/`decrypt` become async API calls. Schema unchanged.
 
 **Status:** Active.
+
+## D-009 — Brand identity stored as `jsonb`, mirrored from Notion
+
+**Date:** 2026-05-01
+**Decision:** `brand_configs.brand_identity` is a single `jsonb` column that holds the full creative+identity envelope (themes, pillars, image rules, blueprints, recipes, CTAs, hooks, lexicon, photo config, plus anything added later). Notion remains the **only** human-editable surface for brand identity. The jsonb is a passive machine-readable mirror.
+
+**Why:** Discovery on Day 2 surfaced that Hashtag's brand identity is composed of **9 separate Notion databases**, all keyed by a `Client` select field (Brand Themes, Pillars, Image Strategy Rules, Blueprints, Content Recipes, CTA Bank, Hook Bank, Lexicon, Photo Config). The original schema had 5 fixed creative columns (`voice`, `pillars`, `banned_words`, `target_audience`, `hashtag_strategy`) which captured maybe 20% of that and could never accommodate evolution (e.g., when Maria/Ivan add a new identity dimension like "tone-by-customer-stage" or "seasonal-photography-direction", typed columns would force ALTER TABLE → migration → redeploy → friction).
+
+Per Ivan #1 ("the human needs control of the brand and it can't live inside some prompt or json file"), Notion stays the human control surface. The jsonb is just an efficient cache for the pipeline. Humans never touch the jsonb directly.
+
+**Alternatives rejected:**
+- **Typed columns** — 80% of Hashtag's existing identity dimensions don't fit; future-additions block on me.
+- **Many narrow tables (one per Notion DB)** — over-engineered for MVP; queries become 9-way joins with no operational gain (the pipeline always wants the full envelope at once).
+- **Read directly from Notion per-pipeline-run** — see D-010; rejected for latency, rate limits, and outage-fragility.
+
+**Status:** Active.
+
+## D-010 — Brand identity sync: 5-min cached pull from Notion, on-demand refresh endpoint
+
+**Date:** 2026-05-01
+**Decision:** A sync job (lives in the Node service, runs every 5 minutes per active brand) reads all 9 Notion DBs filtered to the brand's `Client` value, assembles the canonical jsonb envelope, and upserts into `brand_configs.brand_identity` (also setting `brand_identity_synced_at`). The pipeline reads `brand_identity` from Postgres, never directly from Notion.
+
+A `POST /admin/refresh-brand/:slug` endpoint forces an immediate sync — used by Ivan/Maria when iterating live ("I just changed the photo style, pull it now").
+
+**Why:**
+- **Latency:** Postgres read is sub-1ms; 9 Notion API calls per pipeline-run would add ~1.5–2s overhead.
+- **Rate limits:** Notion's API is 3 req/s per integration. With N brands × 9 DBs × posts-per-day, we'd hit limits at ~10 brands.
+- **Resilience:** Pipeline keeps running through Notion API outages (uses last-synced jsonb).
+- **Latency-of-edit acceptable:** 5 minutes is fast enough that Ivan/Maria don't feel lag during creative work; on-demand endpoint covers the "I want it NOW" case.
+
+**Operational notes:**
+- Sync job emits one Sentry breadcrumb per sync per brand. Failure routes to Telegram Notifier Hub.
+- `brand_identity_synced_at` exposed in `/health` per brand → fast diagnosis if a brand's identity is stale.
+- If Notion sync fails for a brand, the pipeline still uses the last good jsonb (gracefully stale), but the brand is flagged in `/health` and Telegram-alerted after 30 min stale.
+
+**Alternatives rejected:**
+- **Live-read on every pipeline run** — see latency / rate-limit math above.
+- **Webhook-driven (Notion → us)** — Notion doesn't ship reliable webhooks for DB-row changes; would need to be an Automation, which is brittle.
+- **Manual "press to sync" only** — kills the "edit in Notion → next post uses it" promise.
+
+**Status:** Active. Sync job implementation = Day 5.
+
+## D-011 — IG token rotation deferred to Day 7 evening (atomic session)
+
+**Date:** 2026-05-01
+**Decision:** The Hashtag Agencia FB page token (`fb_page_token_2`) needed to publish on `@agenciahashtag_` is currently dead per BUG-S58-4. Token rotation is **not** done as part of Day 2; it gets its own atomic session on Day 7 evening, immediately before Day 8 begins (per-brand publishing).
+
+**Why:**
+- The Node service does NOT publish to IG until Day 8. Publisher A6 in n8n owns publishing through Days 2–7 with its own (separate) token reference.
+- Token rotation = ~25–40 min OAuth dance via Graph API Explorer, prone to failure modes that need focused attention (per existing memory note: "atomic session").
+- Doing it Day 2 burns Day-2 momentum on something that unlocks nothing for 5 days.
+- Doing it Day 7 evening means the freshly-rotated 60-day token is at full lifespan when Day 8 publishing begins.
+
+**Status:** Active. Reminder belongs in TODO.md "Day 7" entry.
