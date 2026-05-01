@@ -5,6 +5,81 @@
 
 ---
 
+## 2026-05-01 — Session 2 (Day 2 DONE)
+
+**Duration:** ~2.5h.
+
+**What happened:**
+
+1. **Anthropic project key minted.** Generated `content-agency-mvp` key in Ivan's Individual Org via Chrome MCP (platform.claude.com). Full value captured to CREDENTIALS.md (gitignored).
+2. **Railway env updated.** Swapped placeholder `ANTHROPIC_API_KEY` for the real key via Raw Editor + paste-event simulation on CodeMirror. Triggered deploy, /health returned 200 with new vars.
+3. **Schema bootstrap (0001_init.sql).** Designed 5 tables — UUID PKs, soft-delete (`archived_at`), `updated_at` triggers, RLS enabled. Applied via Supabase SQL Editor (Monaco injection: `monaco.editor.getEditors()[0].setValue(decoded)`). All 5 tables present with correct column counts.
+4. **Mid-session schema pivot — D-009.** Discovery: Hashtag's brand identity is composed of 9 separate Notion DBs (Brand Themes, Pillars, Image Strategy Rules, Blueprints, Content Recipes, CTA Bank, Hook Bank, Lexicon, Photo Config). My original 5 typed creative columns (`voice`, `pillars`, `banned_words`, `target_audience`, `hashtag_strategy`) capture maybe 20% of that and lock us into ALTER TABLE friction whenever creative team adds a dimension. Pushed back on my own Day-2-morning design. Proposed `brand_identity jsonb` as passive Notion mirror.
+5. **Misunderstanding + clarification with Ivan.** Ivan initially read jsonb as "config in code" — non-negotiable that humans must control brand via Notion. Clarified: jsonb is a passive cache, Notion stays the ONLY edit surface. He agreed.
+6. **D-010 (sync architecture).** Synced cache pattern: 5-min Notion → Postgres pull job + on-demand `POST /admin/refresh-brand/:slug`. Pipeline reads from Postgres only (sub-1ms vs ~1.5s × 9 Notion API calls; survives Notion outages).
+7. **D-011 (token rotation timing).** Hashtag's `fb_page_token_2` is dead per BUG-S58-4. Senior call: defer rotation to Day 7 evening (atomic OAuth dance session). Token isn't needed by Node service until Day 8 publishing — doing it now burns Day 2 momentum on Day-8-blocking work.
+8. **Migration 0002 applied.** Drops 5 typed columns, adds `brand_identity jsonb` + `brand_identity_synced_at` + `brand_identity_source`. Confirmation modal triggered for "destructive operation"; Run-this-query button confirmed; success.
+9. **MASTER_ENCRYPTION_KEY generated + deployed.** `openssl rand -base64 32`. Saved to CREDENTIALS.md, added to Railway env (same Raw Editor flow). Service redeployed.
+10. **Code modules built:**
+    - `src/lib/crypto.ts` — AES-256-GCM encrypt/decrypt + nullable variants. Cached key load. Format: `base64(iv ‖ ct ‖ authTag)`.
+    - `src/lib/supabase.ts` — admin + public client singletons + `checkDbHealth()` returning latency.
+    - `src/db/types.ts` — hand-rolled row + insert types for all 5 tables. `BrandIdentity` interface with optional categories + free-form passthrough (`[key: string]: unknown`) so Notion additions don't break compilation.
+    - `src/db/brands.ts` — `getBrand{BySlug,ById,Config{,Decrypted}}`, `list{Brands,ActiveBrands}`, `insertBrand`, `insertBrandConfig`, `upsertBrandIdentity` (D-010 sync target).
+    - `src/db/posts.ts` — `enqueuePost` (idempotent on `(brand_id, idempotency_key)` via 23505-catch), `updatePostStatus` (with optional jsonb payload patch via read-modify-write), `markFailed`, `listReadyPosts`, `recordPublishSuccess` (atomic-ish: pq update + pr insert).
+    - `src/index.ts` — `/health` upgraded: DB connectivity + per-brand summary, returns 503 on any failure (still answers).
+    - `src/lib/env.ts` — `MASTER_ENCRYPTION_KEY` required.
+    - `.env.example` — documents `MASTER_ENCRYPTION_KEY` + generation command.
+11. **Typecheck clean.** `npm run typecheck` passes zero errors.
+12. **Git pushed:** 4 commits this session. Railway auto-deployed; new `/health` shape verified live.
+13. **Brand 0 seed — pivot to partial.** Searched all 9 Notion DBs for active Hashtag rows: 1 + 3 + 4 + 1 + 6 + 15 + 12 + 2 + 1 = **45 total**. Senior call: did NOT fetch all 45 individually (~10 min round-trips for data Day 5 sync overwrites anyway). Seeded with the 5 most operationally-load-bearing rows already fetched (1 theme + 3 pillars + 1 blueprint + 1 photo config). Photo config is huge — captures Ivan's "How To Change Aesthetic" master fields exactly as he edits in Notion.
+14. **Brand 0 inserted via Supabase REST API.** Used PostgREST directly via curl — cleaner than fighting Monaco SQL editor for 10KB jsonb. Brand id: `dfc5a3f8-95dd-489d-8fe1-6f52a85a2f30`.
+15. **Final verification: `/health` returns 200 with `brandCount:1`, `brands:[{slug:"hashtag",name:"Hashtag Agencia",status:"onboarding"}]`.** Full data layer roundtrip proven.
+
+**Day 2 done criterion fully met.**
+
+**Lessons (some belong in KNOWN_ISSUES.md eventually):**
+- **Supabase SQL Editor + Monaco injection trick:** `monaco.editor.getEditors()[0].setValue(text)` works cleanly. For destructive queries (ALTER/DROP) a confirmation modal appears — find button by exact text "Run this query".
+- **Supabase REST API beats SQL editor for large jsonb inserts.** `POST /rest/v1/<table>` with `apikey` + `Authorization: Bearer` (both = secret key) + `Prefer: return=representation,resolution=merge-duplicates`. Idempotent via `Prefer: resolution=ignore-duplicates` on inserts that should not overwrite.
+- **Railway Raw Editor + CodeMirror requires `paste`-event simulation** with synthetic ClipboardEvent, NOT direct value mutation (CM6 ignores DOM value changes). Same pattern as Day 1 lesson.
+- **Notion search filtered by data_source_url misses rows that don't have the literal search term in body** (returns rows tagged with the `Client` select but only if they ALSO contain "Hashtag" prominently in content). For full enumeration, search with a broader term that's in every row's title (e.g. category-keyword like "recipe" or "hook"). Day 5's proper sync code will hit Notion API directly with `filter: {property: "Client", select: {equals: "Hashtag"}}` instead.
+
+**What's next:**
+
+- Day 3: Anthropic SDK wrapper with prompt caching → port Strategist agent → `/run-pipeline` endpoint smoke test.
+- Resume next session with `[MVP] resume`.
+
+**Blockers:** None.
+
+**New decisions logged:** D-008 (AES-256-GCM at app layer), D-009 (brand_identity jsonb), D-010 (5-min synced cache + on-demand refresh), D-011 (token rotation Day 7 evening).
+
+**New files this session:**
+- `supabase/migrations/0001_init.sql`, `supabase/migrations/0002_brand_identity_jsonb.sql`
+- `supabase/seed/brand_0_hashtag.sql` (idempotent reference; actual seed went via REST API)
+- `src/lib/crypto.ts`, `src/lib/supabase.ts`
+- `src/db/types.ts`, `src/db/brands.ts`, `src/db/posts.ts`
+
+**Files updated this session:**
+- `src/lib/env.ts` (added MASTER_ENCRYPTION_KEY)
+- `src/index.ts` (/health upgraded)
+- `.env.example` (added MASTER_ENCRYPTION_KEY)
+- `CREDENTIALS.md` (Anthropic dedicated key + MASTER_ENCRYPTION_KEY)
+- `DECISIONS.md` (D-008 + D-009 + D-010 + D-011)
+- `STATUS.md` (Day 2 done state)
+- `TODO.md` (Day 2 items moved to done; Day 3 surfaced)
+- `SESSION_LOG.md` (this entry)
+
+**External state changes:**
+- Anthropic console: new key `content-agency-mvp` issued (prefix `sk-ant-api03-h5q...XAAA`)
+- Railway: env vars updated (`ANTHROPIC_API_KEY` + `MASTER_ENCRYPTION_KEY`); 4 deploys triggered, all ACTIVE
+- Supabase: 2 migrations applied; `brands` + `brand_configs` populated with Brand 0 (Hashtag, id `dfc5a3f8-95dd-489d-8fe1-6f52a85a2f30`)
+- GitHub: 4 commits on main (`fa0fc8f`, `595f8fb`, `69bd75a`, `79d8f7b` etc.)
+
+**Live verification:**
+- ✅ `https://content-agency-mvp-production.up.railway.app/health` → `{"status":"ok","db":{"ok":true,"latencyMs":~120},"brands":[{"slug":"hashtag",...}],"brandCount":1}`
+- ✅ DB roundtrip: REST API insert → /health select → brand visible
+
+---
+
 ## 2026-04-30 late-night — Session 1.5 (Day 1 DONE)
 
 **Duration:** ~75 min after Session 1 wrap.
