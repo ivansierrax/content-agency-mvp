@@ -1,10 +1,14 @@
 # STATUS — content_agency_mvp
 
-**Day 1 (2026-04-30 night) — BOOTSTRAP HALFWAY (repo + scaffold pushed; Railway deploy pending)**
+**Day 1 (2026-04-30 night) — ✅ DONE. Service live on Railway, Sentry verified end-to-end.**
 
 ## Where we are
 
-Day 1 partially complete. TypeScript scaffold pushed to GitHub. Railway deploy + Sentry smoke verification still pending — those are the morning of Day 2.
+**Day 1 fully complete.** Service running at `https://content-agency-mvp-production.up.railway.app`. Sentry smoke test verified: `Day 1 Sentry smoke test — intentional error to verify the deploy captures errors.` landed in Sentry as Issue #1.
+
+End-to-end working chain: GitHub push → Railway auto-build → Service boots → Sentry initialized → /throw triggers error → Sentry captures within seconds.
+
+Day 2 starts with Postgres schema + Brand 0 seed.
 
 ## What we have
 
@@ -28,12 +32,11 @@ Day 1 partially complete. TypeScript scaffold pushed to GitHub. Railway deploy +
 - ✅ `gh` CLI installed + authenticated with `repo` + `workflow` scopes
 - ✅ Local git → GitHub origin wired (HTTPS via gh credential helper)
 
-## What we don't have yet
+## What we don't have yet (Day 2+)
 
-- ⚪ Railway not yet linked to GitHub repo (no deploy yet)
-- ⚪ No Railway env vars set (SUPABASE_URL / KEYS / ANTHROPIC_API_KEY / SENTRY_DSN)
-- ⚪ No Sentry capture verified end-to-end (will run `npm run smoke -- --throw` on Railway)
-- ⚪ No Brand 0 row in Postgres (Day 2 — schema migration not started)
+- ⚪ Anthropic dedicated API key (placeholder set; Day 2 first action)
+- ⚪ Supabase Postgres schema not migrated (brands, brand_configs, post_queue, analytics_snapshots)
+- ⚪ No Brand 0 row in Postgres
 - ⚪ Anthropic SDK not yet wired (`src/lib/anthropic.ts` not created — Day 3)
 - ⚪ Supabase SDK not yet wired (`src/lib/supabase.ts` not created — Day 2)
 - ⚪ Pipeline modules not started (Day 3+)
@@ -46,8 +49,8 @@ Day 1 partially complete. TypeScript scaffold pushed to GitHub. Railway deploy +
 |---|---|
 | Plan | 🟢 complete |
 | Architecture | 🟢 decided |
-| Code | 🟡 scaffold + entry point + Sentry/env wiring |
-| Infrastructure | 🟡 SaaS provisioned, repo on GitHub, CI configured, Railway not yet deployed |
+| Code | 🟢 HTTP server live, /health + /throw, Sentry wired |
+| Infrastructure | 🟢 GitHub → Railway auto-deploy → Sentry verified end-to-end |
 | First brand onboarded | ⚪ Day 10 target |
 | Live with paying brand | ⚪ Day 11-14 target |
 
@@ -68,8 +71,13 @@ All credentials in `CREDENTIALS.md`.
 
 ## Last session
 
-**2026-04-30 night (Session 1 — Day 1 bootstrap halfway):** Provisioned all 4 SaaS accounts. Built TypeScript scaffold. Pushed initial commit to GitHub. Pending: Railway link/deploy + Sentry smoke verification. See SESSION_LOG.md for detail.
+**2026-04-30 night (Session 1 — Day 1 DONE):** Provisioned all 4 SaaS accounts. Built TypeScript scaffold (Node 20 + strict TS + Sentry/env wiring). Pushed to GitHub. Linked Railway → GitHub auto-deploy. Set env vars (after fighting Suggested Variables UI for ~10 min). First deploy crashed (vars not saved); after re-Add via Suggested Variables panel + Shift+Enter redeploy, second deploy went ACTIVE. Generated public domain. Curl /health returned 200 with sentryEnabled:true. Curl POST /throw returned 500 + error captured in Sentry as Issue #1 within seconds. Day 1 done criterion fully met.
 
 ## Next session
 
-**Day 1 finish + Day 2 start.** Resume with `[MVP] resume`. First action: link Railway to GitHub repo, set env vars from CREDENTIALS.md, trigger first deploy, run `--throw` smoke and verify Sentry captures it.
+**Day 2 — Postgres schema + Brand 0 seed.** Resume with `[MVP] resume`. First actions:
+1. Generate dedicated Anthropic API key for this project, replace placeholder in Railway env
+2. Create Supabase schema (brands, brand_configs, post_queue, analytics_snapshots) via migration files
+3. Service modules: `src/db/brands.ts`, `src/db/posts.ts`
+4. Seed Brand 0 (Hashtag Agencia) with config mirrored from existing Notion
+5. Decide on encrypted credentials approach (`pgcrypto` vs app-level AES) → log D-008 in DECISIONS.md

@@ -5,7 +5,32 @@
 
 ---
 
-## (No live issues yet — Day 0)
+## Live issues
+
+### ISSUE-001 — Railway "Update Variables" button is misleading in Suggested Variables panel
+- **Symptom:** Clicking "Update Variables" in Railway's Suggested Variables panel APPEARS to save but doesn't persist them — vars come back empty after page refresh. Service crashes on first deploy with `Missing required env var: ...`
+- **Severity:** WARNING (cost ~10 min on Day 1 build; auto-recovers after second attempt)
+- **Root cause:** "Update Variables" only updates form state; "Add" button is the actual persist action. UX bug in Railway dashboard.
+- **Fix:** Use the **"Add"** button in the Suggested Variables panel (NOT "Update Variables"). OR install Railway CLI (`brew install railway` + `railway login`) and use `railway variables --set KEY=VALUE` — deterministic.
+- **Prevention rule:** Next time setting Railway vars, use CLI from day one OR verify by refreshing the page after click — if vars come back empty, click "Add" instead of "Update Variables."
+
+### ISSUE-002 — Railway Deploy button click via JS doesn't reliably trigger redeploy
+- **Symptom:** Clicking the "Deploy ⇧+Enter" button via JS (`btn.click()`) doesn't trigger a new build. Status stays on previous CRASHED state.
+- **Severity:** INFO (workaround easy)
+- **Root cause:** Railway's deploy button is keyboard-shortcut-driven (Shift+Enter), not click-driven for some flows.
+- **Fix:** After ensuring env vars are saved, use keyboard shortcut: click anywhere on the service page first to focus, then send `Shift+Enter`. New build kicks off in <2 seconds.
+- **Prevention rule:** For programmatic Railway control, use Railway CLI (`railway up`) instead of dashboard automation.
+
+### ISSUE-003 — Old crash logs persist on Railway page after successful redeploy
+- **Symptom:** After fixing the env-var issue and redeploying, the project page still shows error strings from the previous crash ("Missing required env var: SENTRY_DSN") in deployment logs section. Easy to think the new deploy is also failing.
+- **Severity:** INFO (cosmetic/observability)
+- **Root cause:** Railway shows historical deploy logs alongside live status; whole-page string search picks up both.
+- **Fix:** Always check the LATEST deployment tile's status indicator (ACTIVE / BUILDING / CRASHED), not whole-page text. Or use `railway logs` CLI for current deploy only.
+- **Prevention rule:** When verifying deploy status programmatically, target the specific latest-deploy DOM element, not body text.
+
+---
+
+## Pre-known landmines (inherited from existing pipeline experience — already mitigated in plan)
 
 ---
 

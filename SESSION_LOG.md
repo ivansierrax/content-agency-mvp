@@ -5,6 +5,70 @@
 
 ---
 
+## 2026-04-30 late-night — Session 1.5 (Day 1 DONE)
+
+**Duration:** ~75 min after Session 1 wrap.
+
+**What happened:**
+
+1. **Entry point upgraded to long-running HTTP server.** Railway expects services to stay alive — a one-shot exit gets restarted in a loop. Added `GET /` (service identifier), `GET /health` (status, will populate per-brand by Day 9), `POST /throw` (test error → Sentry). Plus graceful SIGTERM/SIGINT shutdown and uncaughtException/unhandledRejection global capture. Same code is foundation for Day 9's reliability hardening.
+
+2. **GitHub repo connected to Railway.** Required installing Railway's GitHub App (auto-redirected after navigating to `github.com/apps/railway-app/installations/select_target`).
+
+3. **Railway env vars set.** Fought the Suggested Variables UI for ~10 min — clicking "Update Variables" in the Suggested Variables panel did NOT persist them; the correct button is "Add" in the same panel. Lesson learned for KNOWN_ISSUES.md.
+
+4. **First deploy CRASHED** with `Missing required env var: SENTRY_DSN` because the variables hadn't actually saved on the first attempt.
+
+5. **Re-Add via Suggested Variables panel + Shift+Enter to redeploy** worked. Status went BUILDING → ACTIVE.
+
+6. **Generated public domain**: `content-agency-mvp-production.up.railway.app`.
+
+7. **Smoke tests via curl:**
+   - `GET /` → 200, `{"service":"content_agency_mvp","status":"ok","environment":"production"}`
+   - `GET /health` → 200, `{"status":"ok","sentryEnabled":true,"nodeVersion":"v20.20.2",...}`
+   - `POST /throw` → 500, `{"status":"error captured"}`
+
+8. **Sentry verification:** navigated to `hashtag-agencia.sentry.io/issues/`, confirmed Issue #1 with title "Day 1 Sentry smoke test — intentional error to verify the deploy captures errors." End-to-end chain proven.
+
+**Day 1 done criterion ("Repo deploys to Railway, eval runs in container, Sentry captures errors") is fully met.**
+
+**Lessons for KNOWN_ISSUES.md (will append):**
+- ISSUE-### — Railway "Update Variables" button in Suggested Variables panel does NOT save them; "Add" button does. Fight the UI vs use Raw Editor mode. Or just install Railway CLI and use `railway variables --set` for deterministic behavior next time.
+- ISSUE-### — Railway "Deploy" button click via JS doesn't trigger redeploy reliably; **Shift+Enter keyboard shortcut on the service page works**.
+- ISSUE-### — Initial deploy crash logs persist on the page even after a successful redeploy. Don't trust string-search for "Missing env var" as a state signal — check the LATEST deployment tile's status, not the whole page text.
+
+**What's next:**
+
+- Day 2: Postgres schema + service modules + Brand 0 + dedicated Anthropic key.
+- Resume next session with `[MVP] resume`.
+
+**Blockers:** None.
+
+**New decisions logged:** None new.
+
+**New files this session:**
+- (none — all new file work was in prior session)
+
+**Files updated this session:**
+- `content_agency_mvp/src/index.ts` (entry → HTTP server)
+- `content_agency_mvp/CREDENTIALS.md` (Railway service ID + public URL)
+- `content_agency_mvp/STATUS.md` (Day 1 done state)
+- `content_agency_mvp/TODO.md` (Day 1 done items checked, Day 2 surfaced)
+- `content_agency_mvp/SESSION_LOG.md` (this entry)
+
+**External state changes:**
+- Railway: service `5dedec78-e923-4e72-b046-594f408f1755` ACTIVE on us-west2, public domain generated, 7 env vars set
+- Sentry: Issue #1 captured (test error — can be resolved later)
+- GitHub: 4 commits on main (initial + state-update + http-server + state-update)
+- Auto-deploy: any push to main triggers Railway rebuild
+
+**Live verification:**
+- ✅ `https://content-agency-mvp-production.up.railway.app/` returns 200 JSON
+- ✅ `https://content-agency-mvp-production.up.railway.app/health` returns 200 with `sentryEnabled:true`
+- ✅ `POST /throw` → 500 + error in Sentry within seconds
+
+---
+
 ## 2026-04-30 night — Session 1 (Day 1 bootstrap, partial)
 
 **Duration:** ~75 min after pre-flight wrap.

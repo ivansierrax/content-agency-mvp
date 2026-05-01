@@ -3,23 +3,24 @@
 > Session-level next-actions. Updates every session.
 > For the locked 14-day plan, see `PLAN.md`.
 
-## Right now (Day 1 finish — Railway deploy + Sentry smoke)
+## Day 1 — ✅ DONE (2026-04-30 late-night)
 
-1. [x] Pre-flight done — all 4 services provisioned (see CREDENTIALS.md)
-2. [x] Init `content_agency_mvp/` as TypeScript project (npm init, tsconfig, src/index.ts, src/lib/env.ts, src/lib/sentry.ts)
-3. [x] Create GitHub repo `ivansierrax/content-agency-mvp` (private) + initial commit pushed
-4. [x] Supabase project provisioned (Day 0)
-5. [x] Railway project provisioned (Day 0) — but NOT yet linked to GitHub
-6. [x] Sentry project provisioned + DSN captured (Day 0)
-7. [x] Configure GitHub Actions: typecheck on PR/main
-8. [ ] Link Railway project to GitHub `ivansierrax/content-agency-mvp` repo
-9. [ ] Set Railway env vars from CREDENTIALS.md: `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `ANTHROPIC_API_KEY` (TBD — Day 2 will create dedicated key for cost tracking), `SENTRY_DSN`, `SENTRY_ENVIRONMENT=production`, `NODE_ENV=production`
-10. [ ] Add Railway start command: probably needs Procfile (`web: npm run start`) or railway.json + a build step (`npm run build` to produce dist/index.js)
-11. [ ] First Railway deploy (push to main triggers it once GitHub is linked; may need manual trigger first time)
-12. [ ] Verify: run `npm run smoke -- --throw` on Railway → see error in Sentry within 30s
-13. [ ] Port `content_pipeline/eval/run.mjs` → `src/eval/run.ts` (DEFERRED to Day 2-3 — Day 1's smoke is the boot, port is downstream)
+All steps complete. Service live, Sentry verified end-to-end. See SESSION_LOG.md for details.
 
-**Day 1 done = Railway boot+throw test lights up Sentry dashboard.** Until we see that error, Day 1 isn't truly closed.
+## Right now (Day 2 — Data layer + Brand 0)
+
+1. [ ] Generate dedicated Anthropic API key for this project (https://console.anthropic.com → API Keys → Create). Replace placeholder in Railway env (currently `sk-ant-PLACEHOLDER-DAY2-DEDICATED-KEY-NEEDED`). Track cost separately from n8n key.
+2. [ ] Decide encrypted credentials approach: `pgcrypto` (DB-side) or app-level AES (Node-side). Log to DECISIONS.md as D-008.
+3. [ ] Write Supabase migration SQL: `supabase/migrations/0001_init.sql` — `brands`, `brand_configs`, `post_queue`, `post_results`, `analytics_snapshots`
+4. [ ] Apply migration to Supabase (via dashboard SQL editor or `supabase` CLI)
+5. [ ] Create `src/lib/supabase.ts` — typed client wrapper using publishable + secret keys
+6. [ ] Create `src/db/brands.ts` — `getBrandConfig(brand_id)`, `listActiveBrands()`
+7. [ ] Create `src/db/posts.ts` — `enqueuePost`, `updatePostStatus`, `markFailed`
+8. [ ] Insert Brand 0 (Hashtag Agencia) row + brand_config mirrored from current Notion (voice, pillars, banned_words, target_audience, IG account ID)
+9. [ ] Verify locally: `node -e "import('./dist/db/brands.js').then(m => m.getBrandConfig(0)).then(console.log)"` prints Brand 0's config
+10. [ ] Verify on Railway: redeploy + curl `/health` → `brands: [...]` populated (update health handler)
+
+**Day 2 done = Brand 0 row exists in Postgres, config readable from Node service, /health on Railway shows Brand 0 status.**
 
 ## This week (Week 1 — rest of)
 
