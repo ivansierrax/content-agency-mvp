@@ -13,9 +13,11 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { loadEnv } from './lib/env.js';
-import { initSentry, captureException, flushSentry } from './lib/sentry.js';
+import { initSentry, captureException, flushSentry, setBrandContext } from './lib/sentry.js';
 import { checkDbHealth } from './lib/supabase.js';
-import { listBrands } from './db/brands.js';
+import { getBrandBySlug, listBrands } from './db/brands.js';
+import { extractClaims } from './pipeline/extract_claims.js';
+import type { TopicInput } from './pipeline/types.js';
 
 const env = loadEnv();
 initSentry(env);
@@ -89,10 +91,68 @@ async function handleThrow(_req: IncomingMessage, res: ServerResponse): Promise<
   }
 }
 
+/**
+ * Day 3 smoke endpoint: runs ONLY the extraction step (Strategist sub-step) end-to-end.
+ *
+ * Body: { brand_slug: string, topic: { title: string, source_url: string } }
+ *
+ * Returns the ExtractionResult including dropped[] (which surfaces any claims
+ * Sonnet hallucinated and our verifier caught — D-008/D-012 defense in action).
+ *
+ * Day 4 will extend this to the full chain (strategy → write → ground-check → ...).
+ */
+async function handleRunPipeline(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  // Read body (small JSON, no streaming)
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let body: { brand_slug?: string; topic?: TopicInput };
+  try {
+    body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+  } catch (err) {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'invalid_json', detail: (err as Error).message }));
+    return;
+  }
+
+  if (!body.brand_slug || !body.topic?.title || !body.topic?.source_url) {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'missing_fields',
+      required: ['brand_slug', 'topic.title', 'topic.source_url'],
+    }));
+    return;
+  }
+
+  const brand = await getBrandBySlug(body.brand_slug);
+  if (!brand) {
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'brand_not_found', slug: body.brand_slug }));
+    return;
+  }
+
+  setBrandContext(brand.id, brand.slug);
+
+  const start = Date.now();
+  const extraction = await extractClaims({
+    topic: body.topic,
+    brand_slug: brand.slug,
+  });
+  const elapsed_ms = Date.now() - start;
+
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({
+    brand: { id: brand.id, slug: brand.slug, name: brand.name },
+    topic: body.topic,
+    extraction,
+    elapsed_ms,
+  }, null, 2));
+}
+
 const routes: Route[] = [
   { method: 'GET', path: '/', handler: handleRoot },
   { method: 'GET', path: '/health', handler: handleHealth },
   { method: 'POST', path: '/throw', handler: handleThrow },
+  { method: 'POST', path: '/run-pipeline', handler: handleRunPipeline },
 ];
 
 const server = createServer(async (req, res) => {
