@@ -17,6 +17,7 @@ import { initSentry, captureException, flushSentry, setBrandContext } from './li
 import { checkDbHealth } from './lib/supabase.js';
 import { getBrandBySlug, listBrands } from './db/brands.js';
 import { extractClaims } from './pipeline/extract_claims.js';
+import { runChain } from './pipeline/chain.js';
 import type { TopicInput } from './pipeline/types.js';
 
 const env = loadEnv();
@@ -92,20 +93,21 @@ async function handleThrow(_req: IncomingMessage, res: ServerResponse): Promise<
 }
 
 /**
- * Day 3 smoke endpoint: runs ONLY the extraction step (Strategist sub-step) end-to-end.
+ * Run the full pipeline (Strategist → Writer → Editor → Spanish → QG) for one topic.
  *
- * Body: { brand_slug: string, topic: { title: string, source_url: string } }
+ * Body: {
+ *   brand_slug: string,
+ *   topic: { title: string, source_url: string, source_meta?: ... },
+ *   mode?: 'extract_only'   // optional — keeps the Day 3 behavior for smoke tests
+ * }
  *
- * Returns the ExtractionResult including dropped[] (which surfaces any claims
- * Sonnet hallucinated and our verifier caught — D-008/D-012 defense in action).
- *
- * Day 4 will extend this to the full chain (strategy → write → ground-check → ...).
+ * Default response shape (full chain): RunChainResult — status, envelope (with
+ * extraction, strategy, draft, grounding, telemetry), failure_category if any.
  */
 async function handleRunPipeline(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // Read body (small JSON, no streaming)
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
-  let body: { brand_slug?: string; topic?: TopicInput };
+  let body: { brand_slug?: string; topic?: TopicInput; mode?: 'extract_only' | 'full' };
   try {
     body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
   } catch (err) {
@@ -132,18 +134,35 @@ async function handleRunPipeline(req: IncomingMessage, res: ServerResponse): Pro
 
   setBrandContext(brand.id, brand.slug);
 
+  // Backward-compatible extract-only mode for smoke tests
+  if (body.mode === 'extract_only') {
+    const start = Date.now();
+    const extraction = await extractClaims({ topic: body.topic, brand_slug: brand.slug });
+    const elapsed_ms = Date.now() - start;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      mode: 'extract_only',
+      brand: { id: brand.id, slug: brand.slug, name: brand.name },
+      topic: body.topic,
+      extraction,
+      elapsed_ms,
+    }, null, 2));
+    return;
+  }
+
+  // Full chain
   const start = Date.now();
-  const extraction = await extractClaims({
-    topic: body.topic,
-    brand_slug: brand.slug,
-  });
+  const result = await runChain({ brand, topic: body.topic });
   const elapsed_ms = Date.now() - start;
 
-  res.writeHead(200, { 'content-type': 'application/json' });
+  res.writeHead(result.ok ? 200 : 422, { 'content-type': 'application/json' });
   res.end(JSON.stringify({
+    mode: 'full',
     brand: { id: brand.id, slug: brand.slug, name: brand.name },
-    topic: body.topic,
-    extraction,
+    post_queue_id: result.post_queue_id,
+    status: result.status,
+    failure_category: result.failure_category,
+    envelope: result.envelope,
     elapsed_ms,
   }, null, 2));
 }

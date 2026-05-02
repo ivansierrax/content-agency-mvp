@@ -76,6 +76,134 @@ export interface ExtractionResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Strategy (Strategist output)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type EngagementTrigger =
+  | 'death_declaration'
+  | 'insider_access'
+  | 'identity_provocation'
+  | 'simple_framework'
+  | 'news_roundup';
+
+export type CtaRole = 'save' | 'DM' | 'share';
+
+export type BriefConstraint =
+  | 'numbers_allowed'
+  | 'narrative_only_no_numbers'
+  | 'opinion_only';
+
+export type Format = 'carousel' | 'single_image';
+
+export type ContentType =
+  | 'data_driven'
+  | 'opinion'
+  | 'news'
+  | 'framework'
+  | 'story'
+  | 'analysis';
+
+export interface Strategy {
+  pillar: string;
+  pillar_id: string | null;
+  engagement_trigger: EngagementTrigger;
+  recipe_name: string;
+  recipe_id: string | null;
+  recipe_format: Format;
+  recipe_theme_code: string | null;
+  /** Serialized JSON array of slide_type strings (per recipe). */
+  recipe_slide_sequence: string | null;
+  hook: { id: string | null; name: string; template: string };
+  cta: { id: string | null; name: string; role: CtaRole; text: string };
+  brief: string;
+  brief_constraint: BriefConstraint;
+  brief_constraint_directive: string;
+  anchor_weight_tier: AnchorWeightTier | 'unknown';
+  /** Subset of source_claims the post may cite. Writer is restricted to these. */
+  anchor_claims: AnchorClaims;
+  /** Empty string for single_image. One concrete object metaphor for carousels. */
+  object_concept: string;
+  /** Strategist's 1-2 sentence rationale for the recipe+trigger pick. */
+  reasoning: string;
+  /** Derived content type (per Session 57 routing rules). */
+  content_type: ContentType;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Context Package (Writer-bound payload assembled from Strategy + brand_identity)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CaptionSpec {
+  hook_max_chars: number;
+  insight_range_chars: [number, number];
+  application_range_chars: [number, number];
+  cta_max_chars: number;
+  total_target_chars: number;
+  hashtag_count: number;
+}
+
+export interface LexiconForWriter {
+  translations: Array<{ english: string; spanish: string; notes: string }>;
+  allowed_loanwords: string[];
+  banned_phrases: string[];
+}
+
+export interface BrandThemeForWriter {
+  primary_color: string;
+  bg_dark: string;
+  bg_light: string;
+  heading_font: string;
+  body_font: string;
+}
+
+export interface ContextPackage {
+  topic: { title: string; source_url: string; source_meta: SourceMeta };
+  source_claims: AnchorClaims;
+  anchor_claims: AnchorClaims;
+  anchor_weight: AnchorWeight;
+  strategy: Strategy;
+  voice: {
+    tone_tags: string;
+    pillar_voice_notes: string;
+    pillar_forbidden_angles: string;
+  };
+  lexicon: LexiconForWriter;
+  brand_theme: BrandThemeForWriter;
+  hashtag_pool: string;
+  caption_spec: CaptionSpec;
+  meta: {
+    brand_slug: string;
+    blueprint_version: string;
+    strategist_version: string;
+    assembled_at: string;
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Writer output
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface WriterSlide {
+  slide_number: number;
+  slide_type: string;
+  headline_text?: string;
+  body_text?: string;
+  accent_text?: string;
+  cta_text?: string;
+  person_prompt?: string;
+  object_prompt?: string;
+  data_items?: Array<{ number: string; label: string }>;
+}
+
+export interface WriterDraft {
+  format: Format;
+  recipe: string;
+  slides: WriterSlide[];
+  caption: string;
+  guardrail_violation: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Topic + envelope
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -106,18 +234,14 @@ export interface PostEnvelope {
   /** Set after Strategist's claim-extraction step (D-012). */
   extraction?: ExtractionResult;
 
-  /**
-   * Set after Strategist's strategy-decision step. Picks pillar, recipe, hook, CTA.
-   * Day 4 work — typed loosely for now.
-   */
-  strategy?: Record<string, unknown>;
+  /** Set after Strategist's strategy-decision step (Day 4). */
+  strategy?: Strategy;
 
-  /** Set after Writer step. Day 4 work — typed loosely for now. */
-  draft?: {
-    caption: string;
-    slides: unknown[];
-    format: 'carousel' | 'single_image';
-  };
+  /** Set after assembling the Writer-bound Context Package (Day 4). */
+  context_package?: ContextPackage;
+
+  /** Set after Writer step (Day 4). */
+  draft?: WriterDraft;
 
   /** Set after grounding-check step (D-012). */
   grounding?: {
