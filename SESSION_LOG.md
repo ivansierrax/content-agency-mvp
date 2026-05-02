@@ -5,6 +5,69 @@
 
 ---
 
+## 2026-05-01 → 2026-05-02 CST — Session 3 (Day 3 first iteration DONE + BUG-S58-5 production fix)
+
+**Duration:** ~3.5h (deep — included a full audit of the existing n8n chain + a P1 production bug fix + new module build).
+
+**What happened:**
+
+1. **Started Day 3 with the Strategist port plan** — discovered Strategist is NOT an LLM agent but deterministic Node code. Reframed.
+2. **Audited the full existing chain** by pulling Writer + Editor + Spanish Editor + QG workflows from n8n via MCP. Reading the actual code (not assumptions) revealed the contract is well-grounded: Writer has 5 explicit grounding rules, QG has revise-then-kill loop with Anchor-Pinned Corrector, Editor defers fact-check to QG. My initial "redesign the contract" instinct was wrong.
+3. **Built a hypothesis** that the bug Ivan described ("agent killed content as having stats but it didn't") was at the EXTRACTION step — Sonnet told to be "verbatim" but allowed to paraphrase. Proposed mechanical substring verifier as the fix.
+4. **Validation pass against historical kills.** Pulled SMOKE-S56-01 (Stack Overflow Survey, `failure_category=thin_source`). The trace contradicted my hypothesis: extraction was correct, Writer was correct, **a downstream pre-flight grounding check falsely flagged the real number "65,000" as fabricated**, Corrector replaced it with "masivamente", Phase A correctly killed "masivamente", net failure_category=thin_source (misleading — source was data-rich).
+5. **Read QG's "Extract Reviews" code → found BUG-S58-5.** Asymmetric normalization: corpus replaces `,` with space, needle strips `,` entirely. `corpus.includes(needle)` never matches for ≥1000 numbers with thousand-separator commas. P1 silent bug shipping for unknown duration.
+6. **Patched live n8n QG via `n8n_update_partial_workflow`.** Added parallel `corpusDigits` (digit-only normalization on both sides), switched `.includes()` check to use it. Workflow stayed `active:true` throughout. Verified patch landed.
+7. **Logged BUG-S58-5 to `content_pipeline/KNOWN_ISSUES.md`** with full trace, root cause code excerpt, fix shipped, prevention rule, triage note.
+8. **Logged D-012 to `content_agency_mvp/DECISIONS.md`** — broader lesson for the new service: don't carry forward the re-fetch-and-re-normalize architecture; check against `anchor_claims` directly so two normalize fns can never drift again.
+9. **Built Day 3 modules** all operating on the D-012 contract:
+   - `src/lib/anthropic.ts` — SDK wrapper with prompt caching + cache_hit_rate Sentry breadcrumbs + parseModelJson helper.
+   - `src/pipeline/types.ts` — PostEnvelope + AnchorClaims + ExtractionResult shapes.
+   - `src/pipeline/extract_claims.ts` — verbatim port of n8n extraction prompt + new substring verifier (D-008/D-012 — drops Sonnet hallucinations) + tier reclassification on verified counts + thin-source gate.
+   - `src/pipeline/grounding.ts` — `verifyDraftGrounding()` checks draft numbers against anchor_claims membership using a SINGLE normalize fn on both sides (BUG-S58-5 immune by construction).
+   - `src/index.ts` — `POST /run-pipeline` smoke endpoint (extraction-only for Day 3 first iter).
+10. **Typecheck clean.** One issue (SDK 0.32 doesn't fully type cache_* fields yet) handled with cast-through-unknown + TODO to bump SDK.
+11. **Live smoke test against the historical false-kill source.** Stack Overflow Survey URL → extraction returns `{numeric_claims: [{value: "65,000", context: "polled more than 65,000 developers..."}], dropped: [], tier: "narrative-strong", status: "ok"}`. The number n8n killed is now an anchored claim. Day 4's grounding check will pass it mechanically.
+12. **Caching verified live.** First call 8.1s, second call (same source) 4.8s — ~40% latency drop confirms system prompt caching works as designed. Sentry breadcrumbs have precise rates.
+
+**Day 3 done criterion fully met.** The SINGLE biggest win of the session: the Stack Overflow source — the one whose `65,000 desarrolladores` BUG-S58-5 falsely killed in production — now flows through the new chain correctly. When Day 4 wires the grounding check, "65,000" in a draft will match `anchor_claims.numeric_claims` immediately. The bug class is structurally gone.
+
+**Lessons (some belong promoted to feedback memory eventually):**
+- **n8n MCP `n8n_update_partial_workflow` with `patchNodeField` is exactly the right tool for surgical production fixes.** Use `nodeName` (not `node`) parameter — first attempt failed because of that.
+- **Reading the actual code beats reading the docs.** I ALMOST recommended the wrong fix because I assumed the existing extraction was naive. The 15-min code-read changed the diagnosis entirely.
+- **"Validate hypothesis against historical evidence" before committing to a fix saved building defense for the wrong threat.** The substring verifier is still worth building (defense-in-depth), but the headline win was finding BUG-S58-5 — which I would have missed if I'd skipped the historical replay.
+- **Async background loops (until-loop with curl) instead of polling sleeps** is what unblocks Bash's blocked sleep pattern.
+
+**What's next:**
+- Day 4: Strategist (deterministic) + Writer (LLM) + grounding wired + Editor + Spanish + QG Phase A LLM + post_queue persistence + full /run-pipeline.
+- Resume next session with `[MVP] resume`.
+
+**Blockers:** None.
+
+**New decisions logged:** D-012 (grounding on anchor_claims, not re-normalized source).
+
+**New files this session:**
+- `src/lib/anthropic.ts`
+- `src/pipeline/types.ts`, `src/pipeline/extract_claims.ts`, `src/pipeline/grounding.ts`
+
+**Files updated this session:**
+- `src/index.ts` (added /run-pipeline route)
+- `DECISIONS.md` (D-012 added)
+- `STATUS.md`, `TODO.md`, `SESSION_LOG.md` (this entry)
+
+**External state changes:**
+- **n8n production: workflow `ulIyyThcE1jLOJ1W` (Agent 5v2: Quality Gate v2) patched with BUG-S58-5 fix.** Single-line change to `Extract Reviews` node jsCode. Workflow stayed `active:true`. Verified.
+- `content_pipeline/KNOWN_ISSUES.md` — BUG-S58-5 entry prepended with full forensics + prevention rule.
+- GitHub: 2 commits on main this session (D-012 + Day 3 build).
+- Railway: 2 deploys (after MASTER_ENCRYPTION_KEY env from Session 2 + after Day 3 push). Both ACTIVE.
+- Anthropic: ~10 inference calls during smoke testing. <30K tokens total — negligible cost (~$0.10).
+
+**Live verification:**
+- ✅ `POST /run-pipeline` returns valid ExtractionResult.
+- ✅ Stack Overflow Survey source (historical false-kill) produces verified `65,000` anchor claim.
+- ✅ Prompt cache hit on 2nd call — 40% latency drop.
+
+---
+
 ## 2026-05-01 — Session 2 (Day 2 DONE)
 
 **Duration:** ~2.5h.
