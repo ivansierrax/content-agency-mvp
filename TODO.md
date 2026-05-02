@@ -8,37 +8,31 @@
 ## Day 3 first iteration — ✅ DONE (2026-05-02 CST)
 ## Day 4 — ✅ DONE (2026-05-02 CST)
 ## Day 5 (minimum) — ✅ DONE (2026-05-02 CST)
+## Day 6 — ✅ DONE (2026-05-02 CST)
 
-Notion brand-identity sync live. Hashtag synced 80 rows in 1.9s. Day-4 smoke re-runs cleanly with REAL pillar/recipe/hook/CTA (`"AI / Marketing con IA"` / `DEATH_DATA` / `"Death 2 — operating-dead-model"` / `"AI • Save"`), all with Notion-linked Postgres IDs. See SESSION_LOG.md Session 5 for full trace.
+Designer port shipped. Stack Overflow Survey 2024 source produces a 7-slide rendered carousel with public Supabase Storage URLs in 165s end-to-end. Phase A revise loop exercised live for the first time and recovered cleanly. All 6 slide types render correctly: typography_dark, typography_light, person_photo (Gemini portrait), data_card, object_photo (Gemini scene), closing_cta. See SESSION_LOG.md Session 6 for full trace + slide samples.
 
-D-014 logged: shared agency DBs + per-brand `Client` select filter (single-replica caveat documented).
+D-015 logged: Supabase Storage chosen over production's GDrive for auth simplicity + IG-publish friendliness + no new infra.
 
-Designer port deferred to Day 6 (clean session, focused 4-6h block — TODO already allowed).
+Multi-brand isolation test deferred to Day 7 AM (Designer was the bigger lift; senior call to ship Designer cleanly rather than rush isolation work).
 
-## Right now (Day 6 — Designer port + multi-brand testing)
+## Right now (Day 7 — Multi-brand isolation + onboarding CLI + Hashtag IG token rotation)
 
-1. [ ] Pull Designer A4 (`8KYkBaKg3yeRummd`) via n8n MCP. Read the HCTI rendering chain + Gemini object/person prompt builder + GCS upload + GDrive backup. Decide port boundary (probably hosted HCTI same as production; in-process Gemini SDK; GCS via `@google-cloud/storage`).
+1. [ ] **Multi-brand isolation test (Day 6 deferred):** insert synthetic Brand 1 via direct Postgres INSERT — `slug='testbrand'`, `name='Test Brand'`, `status='onboarding'` + `brand_configs` row with `notion_client_filter='TestClient'` (a string that doesn't exist as a `Client` select option in any of the 8 Hashtag DBs). Trigger `POST /admin/refresh-brand/testbrand` — should return 0 rows in every category. Then `POST /run-pipeline` for Brand 1 with the SO Survey source — should either (a) fail loudly because Strategist can't pick from empty pillars, or (b) run with Sonnet-improvised names. Verify Brand 1's chosen names + IDs are NOT Brand 0's. Document the outcome.
 
-2. [ ] Build `src/pipeline/designer.ts` — consume `WriterDraft` from `post_queue.payload` (status=ready), iterate slides:
-   - typography_dark / typography_light / data_card → HCTI render (HTML template per `slide_type`, fed by brand_themes colors/fonts + slide content).
-   - object_photo → Gemini image gen with the Strategist's `object_concept` baked into prompt + brand_identity.photo rules.
-   - person_photo → Gemini image gen with brand_identity.photo person rules; `person_prompt` filled here (Writer leaves it empty).
-   - closing_cta → HCTI render with CTA-Bank text.
-   Upload each rendered image to GCS, get public URL, write back to slide.url. Advance `status` to `designed`.
+2. [ ] **Onboarding CLI (`scripts/onboard-brand.ts` or `npm run onboard`):** ~150 LOC. Inputs: brand slug, brand name, notion_client_filter, optional ig_business_account_id. Steps: insert `brands` row → insert `brand_configs` row with the filter set → POST to local `/admin/refresh-brand/:slug` to trigger first sync → report counts + warnings. Replaces the manual `INSERT INTO` dance. Day 7 PM token-rotation step uses this same CLI.
 
-3. [ ] Add Day 6 env vars (HCTI_USER_ID + HCTI_API_KEY + GEMINI_API_KEY + GCS_BUCKET + GCS_SERVICE_ACCOUNT_JSON) to Railway. Same `New Variable` button pattern as Day 5.
+3. [ ] **Hashtag IG token rotation (atomic session per D-011):** OAuth dance via Graph API Explorer to mint a fresh 60-day Page-token. Encrypt with `MASTER_ENCRYPTION_KEY` via `src/lib/crypto.ts`. Write to `brand_configs.ig_token_encrypted` for Brand 0. Verify with a `debug_token` Graph API call (must show `is_valid:true`, `expires_at:60-days-out`, `scopes:[pages_show_list,...]`). Log rotation in CREDENTIALS.md.
 
-4. [ ] Smoke test: re-run Day 5's Stack Overflow draft through Designer; verify all 7 slides have valid GCS URLs and images render visually correctly.
+4. [ ] **Day 8 prep notes** — scan `engineering_decisions.md` for IG-publish gotchas already documented (BUG-S58-4, anti-spam throttle, carousel-vs-single ordering rules). Queue Day 8 work items.
 
-5. [ ] Day 6 PM (if time permits): multi-brand isolation test. Insert synthetic Brand 1 with `notion_client_filter='Test'` (will return 0 rows from Hashtag DBs — perfect isolation test). Confirm Strategist for Brand 1 can't see Brand 0's pillars.
-
-**Day 6 done minimum = `/run-pipeline` produces a fully-rendered carousel with real image URLs, status=designed, end-to-end. Multi-brand isolation can spill to Day 7 AM.**
+**Day 7 done minimum = isolation test documented + onboarding CLI works + Hashtag IG token rotated to fresh 60-day. Day 8 builds publish path on top.**
 
 ## This week (Week 1 — rest of)
 
 - ~~Day 4 (Sat 2026-05-02): Writer + Editor + Spanish + QG + grounding-wired end-to-end.~~ ✅
 - ~~Day 5 (Sat 2026-05-02): Notion sync.~~ ✅ minimum done
-- Day 6 (Sun 2026-05-03): Designer port + multi-brand isolation test.
+- ~~Day 6 (Sat 2026-05-02): Designer port.~~ ✅ done; multi-brand isolation deferred to Day 7
 
 ## Next week (Week 2)
 

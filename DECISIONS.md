@@ -253,3 +253,27 @@ Sync mechanics:
 - Per-brand cron schedule — not worth the complexity until brands have wildly different update cadences. MVP uses one global 5-min loop.
 
 **Status:** Active. Implements D-010 (synced cache pattern) at the operational layer.
+
+## D-015 — Slide image storage: Supabase Storage (not GDrive like production)
+
+**Date:** 2026-05-02
+**Decision:** Rendered slide PNGs upload to **Supabase Storage** (bucket `mvp-content`, public read, 10MB cap, image MIME types only), at path `<brand_slug>/<post_queue_id>/slide-NN.png`. Public URL format: `${SUPABASE_URL}/storage/v1/object/public/mvp-content/<path>`.
+
+**Why diverge from production (which uses GDrive):**
+- **Auth surface:** Supabase Storage uses our existing service-role key (already on Railway). GDrive needs OAuth refresh-token plumbing (long-lived tokens go invalid silently — same class as BUG-S58-4).
+- **IG Graph API friendliness:** IG `/me/media` requires a `image_url` that's a direct PNG. Supabase public-bucket URLs serve `Content-Type: image/png` natively. GDrive direct-download URLs have historically been flaky for IG (occasional HTML preamble before the image, fixable but fragile).
+- **No new infra:** zero new accounts, zero new auth flows, zero new IAM policies. The bucket creation was one REST call.
+- **Cost:** Supabase free tier covers ~1GB storage + 2GB egress/month. At ~5MB per carousel × 90 posts/month = 450MB. Well within free tier through MVP.
+
+**Mechanics:**
+- Bucket created 2026-05-02 via `POST /storage/v1/bucket` with `{public:true, file_size_limit:10485760, allowed_mime_types:[png,jpeg,webp]}`.
+- Designer calls `POST /storage/v1/object/<bucket>/<path>` with `Content-Type: image/png` + `x-upsert: true` (idempotent on retry).
+- Public URL is constructed deterministically — no extra round-trip to fetch a signed URL.
+
+**Alternatives rejected:**
+- **GDrive (production parity)** — heavier auth, IG-publish flakiness, no real upside for MVP.
+- **GCS (Google Cloud Storage)** — clean service-account auth, but adds a new IAM surface and new bucket to provision. Same outcome as Supabase Storage at higher cost (in time).
+- **Cloudflare R2** — cheaper egress, but new auth + new account. Day 9+ if egress becomes meaningful.
+- **Inline base64 in PostEnvelope** — non-starter; payload jsonb explodes to ~5MB per post, makes status queries slow.
+
+**Status:** Active. Verified live 2026-05-02 — 7/7 slides on a Stack Overflow Survey 2024 source uploaded successfully (1 typography_dark@633KB, 1 person_photo@5.5MB with Gemini bg, 1 typography_light, 1 data_card, 1 object_photo@6.0MB with Gemini bg, 1 typography_dark, 1 closing_cta) and all return `200 image/png` from public URLs.

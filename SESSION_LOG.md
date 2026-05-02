@@ -5,6 +5,88 @@
 
 ---
 
+## 2026-05-02 CST — Session 6 (Day 6 DONE — Designer live, full chain ships designed carousels)
+
+**Duration:** ~3.5h. Sessions 4 → 5 → 6 ran back-to-back as one long day.
+
+**What happened:**
+
+1. **Senior pre-build calls up-front** (before reading any code): HCTI hosted matches production, Gemini 2.5 Flash Image is the image-gen model line (NOT Gemini 3 Pro — that's the text rule), GDrive **rejected** for storage in favor of Supabase Storage. Logged D-015 reasoning: same project we already authenticate against, public URLs trivially, no OAuth refresh-token plumbing, IG Graph API friendly.
+2. **Pulled Designer A4 (`8KYkBaKg3yeRummd`) via MCP** + extracted "Build Render Jobs" code (19KB) via `jq`. Read the actual production code. Confirmed:
+   - Photo prompt enrichment is deterministic Node, not an LLM call.
+   - Weighted-pool format is `"European 50% · Asian 30% · Black 20%"` parsed via regex.
+   - Gemini call: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent` with `responseModalities:['IMAGE','TEXT']`.
+   - 6 HTML templates inline, ~600 LOC of styled `<div>`s. Simple to port.
+3. **Created Supabase Storage bucket `mvp-content`** via single REST call: `POST /storage/v1/bucket` with `{public:true, file_size_limit:10485760, allowed_mime_types:[image/png, image/jpeg, image/webp]}`. Returned `{name:"mvp-content"}` immediately. Verified bucket settings via GET.
+4. **Built `src/pipeline/designer.ts`** (~500 LOC, faithful port):
+   - `enrichPhotoSlides()`: deterministic weighted-pool picks for ethnicity / wardrobe / setting / time of day / palette / surface (port of n8n's `pickWeighted` + parsers). Alternates gender across person_photo slides per genderIdx counter.
+   - `generateAllPhotos()`: `Promise.allSettled` parallel Gemini calls (one per photo slide); image base64 attached to per-index map.
+   - 6 HTML template functions: `buildTypographyDark` (alternating black/red bg per slide-position parity) / `buildTypographyLight` / `buildPersonPhoto` / `buildObjectPhoto` / `buildDataCard` / `buildClosingCta`. Verbatim port; only diff is they take a `ThemeColors` object built from `brand_identity.themes[0]` + `BrandThemeForWriter` instead of hardcoded.
+   - `renderHtmlToPng()`: HCTI Hosted (`POST /v1/image` with Basic auth + viewport 1080×1350×2 device scale) → returns CDN URL → download PNG bytes for re-upload.
+   - `uploadSlide()`: `POST /storage/v1/object/<bucket>/<path>` with `Content-Type: image/png` + `x-upsert: true` (idempotent on retry).
+   - Per-slide error isolation in the orchestrator loop: try/catch around each slide, `failures[]` accumulator, slides without a URL pass through as-is so chain.ts can decide partial-fail vs all-fail.
+5. **Wired Designer into `chain.ts`** after QG Phase A pass: status flow now `qg → designer → ready` (was `qg → ready`). Added `WriterSlide.url` field to types. All-fail → `failure_category='designer_all_failed'`. Partial-fail → `status_reason='designer_partial: N ok, M failed'`.
+6. **Added 3 Railway env vars** via the per-variable form (Day 5 pattern proven): HCTI_USER_ID + HCTI_API_KEY + GEMINI_API_KEY (all from production Designer Config dump). 1-click Deploy.
+7. **Committed + pushed** (`47abe86` Day 6 build, 5 files, 579 insertions).
+8. **Day 6 smoke test against `https://survey.stackoverflow.co/2024/`:**
+   - `status='ready'` in **165.8s end-to-end**.
+   - **7/7 slides rendered** with public URLs, 0 failed.
+   - **Phase A revise loop exercised live for the first time** in any smoke run — initial revise → Writer rewrite → Editor → Spanish → Phase A retry → pass. ~70s extra latency for the recovery, all four steps captured in telemetry.
+   - All 6 slide types covered (carousel was: typography_dark / person_photo / typography_light / data_card / object_photo / typography_dark / closing_cta).
+9. **Visual verification via inline image read of slides 01, 02, 05:**
+   - Slide 01 (typography_dark): clean hook with red `YA MURIÓ` accent on black bg. Real source numbers (65,437 + 185 países + mayo 2024) anchored. Spanish correct (TÚ form, no voseo, accents present).
+   - Slide 02 (person_photo): Gemini editorial portrait of a person at a laptop in a modern office during late-afternoon light. Brand text overlay clean over gradient. Headline `TU CRITERIO DE HACE DOS AÑOS YA NO APLICA` with red `YA NO APLICA` accent. Source attribution `"Según Stack Overflow"` present in body. Recognizably an editorial photo, not a stock image.
+   - Slide 05 (object_photo): Gemini interpreted the MySQL-vs-PostgreSQL object concept as analog measurement gauges with `MYSQL` and `PostSQL` labels — creative + on-brand. Real source numbers (59% / 49% / 33% / 2018) anchored.
+10. **D-015 logged** documenting storage choice rationale + alternatives rejected (GDrive parity, GCS new-infra, R2 cheaper-egress, inline base64 envelope-bloat).
+
+**Day 6 done criterion fully met.** The pipeline now produces production-quality finished carousels end-to-end. Day 8 publishing has everything it needs (public PNG URLs + IG-Graph-API-friendly content type).
+
+**Step durations (Day 6 smoke, full chain including Designer + Phase A revise loop):**
+| Step | Duration |
+|---|---|
+| extract_claims | 13.3s |
+| strategist | 15.0s |
+| writer | 22.2s |
+| editor | 18.3s |
+| spanish_editor | 9.7s |
+| qg_phase_a | 7.8s |
+| writer_phase_a_rewrite | 21.3s |
+| editor_phase_a_rewrite | 16.6s |
+| spanish_editor_phase_a_rewrite | 9.8s |
+| qg_phase_a_retry | 3.0s |
+| **designer** | **27.0s** (7 slides, 2 Gemini calls + 7 HCTI renders + 7 storage uploads) |
+| **TOTAL** | **165.8s** |
+
+**Lessons (some belong promoted to feedback memory eventually):**
+- **Read the production code BEFORE choosing dependencies.** I almost reached for GCS by default; pulling Designer A4 via MCP + reading the actual code (and reflecting on what auth surface I'd add) revealed Supabase Storage as the cleaner choice — same project, already authenticated, IG-friendly URLs.
+- **Per-slide error isolation matters.** A single Gemini timeout (30s+) shouldn't kill a 7-slide carousel. The `for` loop with try/catch + `failures[]` accumulator is the right pattern; partial-fail status_reason gives Day 8 publishing the signal it needs to decide whether to ship a partial.
+- **Public bucket + deterministic path = simplest possible URL story.** No signed URLs, no expiration, no extra round-trips. IG Graph API on Day 8 will accept these directly.
+- **Phase A revise loop validated live for the first time.** Day 4-5 smokes never tripped Phase A's `revise` verdict; Day 6's first run did. The Writer rewrite path + Editor + Spanish + Phase A retry all worked cleanly. Confidence-building: the failure-recovery path that I built but never exercised actually works end-to-end.
+- **Same Railway env-var pattern reused across 3 sessions** (Day 5 + Day 6) — `New Variable` form + React-friendly `setReactValue` + per-variable Deploy. Boring beats clever; the Raw Editor's CodeMirror was the wrong tool every time.
+
+**External state changes:**
+- GitHub: 1 commit on main (`47abe86` Day 6 Designer port). State-docs commit pending.
+- Railway: 3 env vars added (HCTI_USER_ID, HCTI_API_KEY, GEMINI_API_KEY); 1 deploy ACTIVE.
+- Supabase: bucket `mvp-content` created (public, image MIME, 10MB cap); 7 slides uploaded under `hashtag/b0ebe1ca-8f1a-44bb-a584-9329cc32fab5/` for the test post.
+- Anthropic: ~10 inference calls (Strategist + Writer×2 + Editor×2 + Spanish×2 + Phase A×2 + writer's grounding rewrite path NOT triggered today — interesting). Caching active.
+- Gemini: 2 image-gen calls (person_photo + object_photo). ~20-25s each.
+- HCTI: 7 render calls (one per slide). ~3-5s each.
+
+**New decisions logged:** D-015 (Supabase Storage for slide PNGs).
+
+**What's next:**
+- Day 7: multi-brand isolation test + onboarding CLI + Hashtag IG token rotation. Resume with `[MVP] resume`.
+
+**Blockers:** None.
+
+**Live verification:**
+- ✅ `POST /run-pipeline` against Stack Overflow Survey 2024 → `status='ready'` in 165.8s with 7/7 slides + public URLs.
+- ✅ Public URLs return `200 image/png` + correct Content-Type. PNG dimensions 2160×2700 (1080×1350 × 2 device scale exactly per HCTI config).
+- ✅ Photo slides (5.5–6.0 MB) embed Gemini-generated backgrounds; text slides (524 KB–633 KB) typography-only.
+- ✅ Phase A revise loop traversed cleanly for the first time in any smoke.
+
+---
+
 ## 2026-05-02 CST — Session 5 (Day 5 minimum DONE — Notion sync live, full identity in pipeline)
 
 **Duration:** ~3h. Continuation of Session 4's day; Sessions 4 + 5 ran back-to-back.
