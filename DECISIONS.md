@@ -225,3 +225,31 @@ If either tier matches, the number is grounded. If both miss, it's flagged unanc
 - Re-fetch source in grounding (n8n's pattern) — costs ~1.5s per post on the QG path and reintroduces the failure mode if source URL becomes unreachable.
 
 **Status:** Active. Supersedes D-012's "claims-only" interpretation while keeping D-012's single-normalize principle. Verified live 2026-05-02 — Stack Overflow Survey 2024 source produced 33-number, 0-unanchored draft that reached `status='ready'`.
+
+## D-014 — Notion sync: shared agency DBs + per-brand `Client` select filter (D-010 implementation)
+
+**Date:** 2026-05-02
+**Decision:** The Notion → Postgres brand-identity sync uses a SINGLE set of shared Hashtag-agency data sources (8 DB IDs hardcoded in `src/sync/notion-brand.ts` as `NOTION_DATA_SOURCES`), filtered per-brand by the `Client` select-option value stored in `brand_configs.notion_client_filter` (migration 0003).
+
+Sync mechanics:
+- 5-min `setInterval` loop with ±60s jitter (`src/sync/scheduler.ts`).
+- Per-brand error isolation via try/catch inside `syncAllBrands` — one brand's Notion outage cannot block others.
+- On-demand `POST /admin/refresh-brand/:slug` for manual triggers.
+- Full identity replacement on each sync (no diff-merge); Notion is single-source-of-truth.
+- Single shared Notion API token via env (`NOTION_API_KEY`). Day 9 cleanup migrates to a dedicated scoped integration; Day 7 onboarding-CLI may swap to per-brand `brand_configs.notion_token_encrypted` if a brand owns its own Notion workspace.
+
+**Why:**
+- Matches the existing n8n Strategist's "Load Scouted + Creative Config" architecture verbatim. Hashtag agency manages all clients in shared DBs partitioned by `Client` select. No per-brand Notion workspace duplication needed.
+- One sync code path, eight DBs, N brands — scales to dozens of brands without code changes.
+- Per-brand isolation lives at the FILTER layer, not the DB layer. Clean.
+- 5-min cadence is cheap (~16 Notion API calls per brand per sync × 1 brand × 12 syncs/h = 192 calls/h, well under the 3 req/s rate limit) and the pipeline reads from Postgres anyway (sub-1ms vs ~1.5s × 8 Notion fetches at run-time).
+
+**Single-replica caveat:** the cron loop runs in-process via `setInterval`. If we scale Railway to N>1 replicas, two replicas would race each other. Day 9 reliability hardening moves this to a Postgres advisory lock (`pg_try_advisory_lock`) or `pg_cron`. Not a Day-5 problem.
+
+**Alternatives rejected:**
+- Per-brand Notion workspace duplication (separate DBs per brand) — wastes work for clients without their own creative team, and breaks the "Hashtag manages all clients in one place" workflow that already works for the human side.
+- Synchronous Notion read at pipeline time (no Postgres cache) — adds ~1.5s per pipeline run + breaks if Notion is down. Original D-010 already rejected this.
+- One Notion DB per brand with shared schema — same as workspace duplication, just smaller blast radius. Still operationally heavier than the filter-by-select pattern.
+- Per-brand cron schedule — not worth the complexity until brands have wildly different update cadences. MVP uses one global 5-min loop.
+
+**Status:** Active. Implements D-010 (synced cache pattern) at the operational layer.
