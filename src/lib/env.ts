@@ -19,6 +19,14 @@ export interface Env {
   NOTION_VERSION: string;
   /** Optional shared secret for /admin/* endpoints. If unset, admin endpoints are open. */
   ADMIN_TOKEN?: string;
+  /** HCTI Hosted API user ID (Day 6 Designer). */
+  HCTI_USER_ID: string;
+  /** HCTI Hosted API key (Day 6 Designer). */
+  HCTI_API_KEY: string;
+  /** Gemini API key for image generation (Day 6 Designer). */
+  GEMINI_API_KEY: string;
+  /** Supabase Storage bucket for rendered slide images. */
+  MVP_CONTENT_BUCKET: string;
 }
 
 function required(name: string): string {
@@ -52,6 +60,10 @@ export function loadEnv(): Env {
     PORT: Number(optional('PORT', '3000')),
     NOTION_API_KEY: required('NOTION_API_KEY'),
     NOTION_VERSION: optional('NOTION_VERSION', '2025-09-03'),
+    HCTI_USER_ID: required('HCTI_USER_ID'),
+    HCTI_API_KEY: required('HCTI_API_KEY'),
+    GEMINI_API_KEY: required('GEMINI_API_KEY'),
+    MVP_CONTENT_BUCKET: optional('MVP_CONTENT_BUCKET', 'mvp-content'),
     ...(process.env.ADMIN_TOKEN && process.env.ADMIN_TOKEN.trim() !== ''
       ? { ADMIN_TOKEN: process.env.ADMIN_TOKEN }
       : {}),

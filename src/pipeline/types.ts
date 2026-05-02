@@ -200,6 +200,8 @@ export interface WriterSlide {
   person_prompt?: string;
   object_prompt?: string;
   data_items?: Array<{ number: string; label: string }>;
+  /** Public URL to the rendered PNG. Set by the Designer step (Day 6). */
+  url?: string;
 }
 
 export interface WriterDraft {

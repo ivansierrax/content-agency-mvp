@@ -22,6 +22,7 @@ import { verifyDraftGrounding } from './grounding.js';
 import { runEditor } from './editor.js';
 import { runSpanishEditor } from './spanish_editor.js';
 import { runPhaseA } from './qg_phase_a.js';
+import { runDesigner } from './designer.js';
 import type { GroundingResult } from './grounding.js';
 import type {
   ContextPackage,
@@ -212,12 +213,49 @@ export async function runChain(params: RunChainParams): Promise<RunChainResult> 
       );
     }
 
-    // 10. Reached 'ready'. Designer (Day 5+) picks up from here.
-    await updatePostStatus(postId, 'ready', {
+    // 10. Text-side passes. Advance to 'designer' status, run Designer (Day 6).
+    await updatePostStatus(postId, 'designer', {
       reason: 'pipeline_text_ready',
       payloadPatch: {
         ...envelopeToPayload(envelope),
         qg_phase_a: phaseA,
+      },
+    });
+
+    const designerResult = await timed(envelope, 'designer', () =>
+      runDesigner({
+        context_package: envelope.context_package!,
+        draft: envelope.draft!,
+        brand_id: brand.id,
+        brand_slug: brand.slug,
+        post_queue_id: postId,
+      })
+    );
+    envelope.draft = designerResult.draft;
+
+    // If ALL slides failed to render, treat as failure. Partial failures continue
+    // to 'ready' — Day 8 publishing can decide whether to ship a partial carousel.
+    if (designerResult.slides_rendered === 0 && designerResult.slides_failed > 0) {
+      return await fail(
+        postId,
+        envelope,
+        'designer_all_failed',
+        `Designer rendered 0/${designerResult.slides_failed} slides`
+      );
+    }
+
+    // 11. Reached 'ready' (designed). Day 8 publishing picks up from here.
+    await updatePostStatus(postId, 'ready', {
+      reason: designerResult.slides_failed > 0
+        ? `designer_partial: ${designerResult.slides_rendered} ok, ${designerResult.slides_failed} failed`
+        : 'designed',
+      payloadPatch: {
+        ...envelopeToPayload(envelope),
+        designer: {
+          slides_rendered: designerResult.slides_rendered,
+          slides_failed: designerResult.slides_failed,
+          failures: designerResult.failures,
+        },
       },
     });
 
