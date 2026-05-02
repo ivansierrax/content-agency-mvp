@@ -1,54 +1,63 @@
 # STATUS — content_agency_mvp
 
-**Day 3 first iteration (2026-05-01 → 2026-05-02 CST) — ✅ DONE. Anthropic SDK wrapper + claim extraction with substring verifier + grounding check live. Smoke test passes against the source that BUG-S58-5 historically false-killed.**
+**Day 4 (2026-05-02 CST) — ✅ DONE. Full chain end-to-end verified live: extract → strategize → write → ground → edit → spanish → QG Phase A → `status='ready'`. Stack Overflow Survey 2024 source produced 33-number, 0-unanchored, 10-slide draft in 113s.**
 
 ## Where we are
 
-End of Day 3 first iteration. The Node service has:
-- A working data layer (Day 2: 5 tables, Brand 0 seeded, /health surfaces it).
-- Anthropic SDK wrapper with prompt caching (40% latency drop on cached calls verified live).
-- Claim extraction with **substring verifier** (D-008/D-012 — Sonnet-side hallucination defense).
-- Grounding check that operates on `anchor_claims` membership, not re-fetched source text — BUG-S58-5 cannot recur in this code by construction.
-- `POST /run-pipeline` smoke endpoint live.
-- The historical Stack Overflow false-kill source replayed end-to-end through the new chain — `65,000` is correctly anchored, `dropped: []`, `status: ok`.
+End of Day 4. The Node service has the **full text-side pipeline** running:
 
-Day 4 layers Writer (the first LLM-author step) + Phase A grounding gate + Editor/Spanish/QG.
+- ✅ Extraction with substring verifier (D-008/D-012, Day 3).
+- ✅ Strategist as a single LLM call (single-topic port of n8n's Strategy Decision) — pillar / engagement_trigger / recipe / hook / CTA / brief / anchor_claims subset / object_concept.
+- ✅ Context Package assembly (deterministic Node).
+- ✅ Writer (single LLM call, verbatim port of n8n Writer prompt + structural validator).
+- ✅ Pre-Phase-A grounding — two-tier (claims set + source_text fallback), single normalize fn (D-013, supersedes D-012's narrower interpretation).
+- ✅ Writer rewrite path with grounding feedback (1-attempt budget).
+- ✅ Editor Rules A+C+D (LLM, with CTA-immutable enforcement).
+- ✅ Spanish Editor (LLM, with length-ratio + double-accent safeguards).
+- ✅ QG Phase A semantic verifier (LLM, anchor_claims contract).
+- ✅ Phase A revise path → Writer rewrite + Editor + Spanish + Phase A retry (1-attempt budget).
+- ✅ post_queue persisted at every step boundary; final `status='ready'` reached.
+- ✅ `/run-pipeline` HTTP endpoint runs full chain end-to-end. Backward-compatible `mode=extract_only` for Day 3 smoke parity.
+
+Day 5 picks up Notion sync + Designer.
 
 ## What we have
 
-- ✅ Day 1 done (HTTP server, Sentry verified — Session 1.5).
-- ✅ Day 2 done (data layer, Brand 0 seeded — Session 2).
-- ✅ **Day 3 first iteration (Session 3):**
-  - `src/lib/anthropic.ts` — SDK wrapper with prompt caching (`cache_control: ephemeral`), Sentry breadcrumbs per call (cache_hit_rate, tokens, elapsed_ms, step, brand_slug). `parseModelJson` helper handles fence-stripping + substring fallback.
-  - `src/pipeline/types.ts` — `PostEnvelope` shape, `AnchorClaims`, `ExtractionResult`. Each chain step appends its own slice.
-  - `src/pipeline/extract_claims.ts` — Jina fetch → bot-block detection → LLM extraction (verbatim port of n8n prompt) → **substring verifier** → tier reclassification on verified counts → thin-source gate.
-  - `src/pipeline/grounding.ts` — `verifyDraftGrounding()` checks draft numbers against `anchor_claims.numeric_claims[].value` membership. SINGLE normalize fn used both sides. Verdict: pass / revise / kill.
-  - `src/index.ts` — `POST /run-pipeline` smoke endpoint (extraction-only for Day 3; Day 4 will extend through write+ground+edit).
-- ✅ Decisions logged D-008 → D-012 (D-008 AES, D-009 jsonb, D-010 sync, D-011 token defer, D-012 grounding-on-anchor-claims).
-- ✅ Production n8n QG patched in-flight: BUG-S58-5 fixed in workflow `ulIyyThcE1jLOJ1W` (asymmetric normalization → symmetric `corpusDigits`). Logged to `content_pipeline/KNOWN_ISSUES.md`.
+- ✅ Day 1 (HTTP server, Sentry — Session 1.5).
+- ✅ Day 2 (data layer, Brand 0 — Session 2).
+- ✅ Day 3 first iteration (extraction + grounding modules — Session 3).
+- ✅ **Day 4 (full text-side chain — Session 4):**
+  - `src/pipeline/strategist.ts` — single-topic LLM port + Context Package assembly. Defensively handles partial Brand 0 identity.
+  - `src/pipeline/writer.ts` — verbatim Writer prompt port + fresh/rewrite modes + structural validator + Rule [F] accent_text-substring auto-patch.
+  - `src/pipeline/editor.ts` — Rules A+C+D LLM + CTA-immutable enforcement (closing_cta + caption-tail line restored from original draft on revise).
+  - `src/pipeline/spanish_editor.ts` — Mexican-Spanish LLM + length-ratio gate + double-accent revert.
+  - `src/pipeline/qg_phase_a.ts` — LLM verifier against anchor_claims; verdicts pass/revise/kill.
+  - `src/pipeline/chain.ts` — orchestrator wiring all steps, persistence at every boundary, two revise budgets (pre-Phase-A grounding + Phase A LLM).
+  - `src/index.ts` — `/run-pipeline` extended; `mode=extract_only` retained.
+  - Two-tier grounding (`extract_claims.ts` exposes `source_text`; `grounding.ts` accepts it as tier-2 corpus).
+  - D-013 logged.
 
-## What we don't have yet (Day 4+)
+## What we don't have yet (Day 5+)
 
-- ⚪ **Strategist's strategy-decision step** (Node deterministic — pick pillar/recipe/hook/CTA from brand_identity + extracted claims). Day 4.
-- ⚪ **Writer** (first LLM-author agent — port n8n's Writer system prompt verbatim, parameterize by brand_identity + claims + strategy). Day 4.
-- ⚪ **Pre-Phase-A grounding wired** (call `verifyDraftGrounding()` between Writer and Editor). Day 4.
-- ⚪ **Editor + Spanish Editor + QG Phase A LLM** (port from n8n). Day 4.
-- ⚪ **post_queue persistence** at every step boundary (currently /run-pipeline returns ExtractionResult inline; needs to insert + update_status). Day 4.
-- ⚪ **Designer** (HCTI + Gemini + GCS + GDrive port). Day 5.
-- ⚪ **Notion sync** — pull all 9 DBs filtered to Client=<brand>, upsert brand_identity. Day 5 — D-010.
-- ⚪ Multi-brand testing, onboarding CLI, token rotation Day 7, per-brand publishing Day 8, reliability Day 9, E2E + first real brand Day 10.
+- ⚪ **Notion sync** — `src/sync/notion-brand.ts` reads 9 DBs filtered to Client=<brand>, upserts `brand_identity` jsonb. 5-min cron loop + `POST /admin/refresh-brand/:slug`. Day 5.
+- ⚪ **Designer** — port HCTI + Gemini + GCS + GDrive rendering chain from CD v3 (workflow `8KYkBaKg3yeRummd`). Day 5.
+- ⚪ **Multi-brand testing** (3 brands isolated, no cross-brand leakage) Day 6.
+- ⚪ **Onboarding CLI** Day 7 AM. **Hashtag IG token rotation** atomic session Day 7 PM.
+- ⚪ **Per-brand publishing** (Node-side IG publish or hand-off to Publisher A6) Day 8.
+- ⚪ **Reliability hardening** Day 9.
+- ⚪ **E2E + first real brand onboarded** Day 10.
 
 ## Health
 
 | Component | Status |
 |---|---|
 | Plan | 🟢 |
-| Architecture | 🟢 12 active decisions logged (D-001 through D-012) |
-| Code | 🟢 data layer + extraction + grounding live, typecheck clean |
+| Architecture | 🟢 13 active decisions logged (D-001 through D-013) |
+| Code | 🟢 full chain live, typecheck clean |
 | Infrastructure | 🟢 Railway → Sentry → Supabase → Anthropic |
 | Brand 0 seeded | 🟢 partial (Day 5 sync completes the rest) |
-| First extraction live + verified | 🟢 (Stack Overflow source — historical false-kill — now passes) |
-| First full draft | ⚪ Day 4 target |
+| First extraction live + verified | 🟢 (Day 3) |
+| First full draft reaching `status=ready` | 🟢 (Day 4 — Stack Overflow Survey 2024) |
 | First real brand onboarded | ⚪ Day 10 target |
 | Live with paying brand | ⚪ Day 11-14 target |
 
@@ -58,63 +67,54 @@ None.
 
 ## Last session
 
-**2026-05-01 → 2026-05-02 CST (Session 3 — Day 3 first iteration DONE + BUG-S58-5 production fix):**
+**2026-05-02 CST (Session 4 — Day 4 DONE, full chain live):**
 
-Started Day 3 with the planned Strategist port. **Pulled Strategist + Writer + Editor + Spanish Editor + QG full code from n8n via MCP** to read the existing chain in detail before porting. Discovery sequence:
+Built and shipped the entire text-side chain in one session. Highlights below; full trace in SESSION_LOG.md.
 
-1. **Strategist is NOT an LLM agent** — it's deterministic Node code: scout topic → fetch source → extract claims → pick pillar/recipe → assemble Context Package → trigger Writer (the first LLM step). Reframed Day 3 plan accordingly.
+1. **Pulled all five n8n workflows via MCP** (Strategist + Writer + Editor + Spanish Editor + QG v2). Read the actual code, not the docs.
+2. **Architecture pivot — Strategist IS an LLM agent.** Session 3's "deterministic Node" reading was wrong; the real `Strategy Decision` node is a Sonnet call with a 100+ line prompt. Reframed Day 4 plan, flagged the pivot to Ivan, ported faithfully.
+3. **Built Strategist + Writer + Editor + Spanish + QG Phase A + chain.ts orchestrator** — six new modules, ~2100 LOC. Verbatim prompts ported from n8n where they exist; new code only for Node-side wiring.
+4. **Single LLM provider (Sonnet 4.6) across all chain steps for MVP consistency** — confirmed with Ivan; Day 9 cost review can split per-step models on real telemetry.
+5. **First smoke test failed** (`status=failed`, `failure_category=thin_source`) — Stack Overflow blog URL had moved (404). Switched to live URL `survey.stackoverflow.co/2024/`.
+6. **Second smoke surfaced a contract bug:** Writer cited `185 países`, `70% (year ago)`, `44%` — real source numbers but outside Strategist's curated anchor subset. Pre-Phase-A grounding killed legitimately grounded content.
+7. **D-013 — two-tier grounding.** Day 3's grounding (D-012) only checked Strategist's curated `anchor_claims`. Real source numbers outside the top-15 extraction cap got flagged as fabricated. Fix: tier-1 = full extraction set; tier-2 = full `source_text` substring fallback. Same single normalize fn on both sides → BUG-S58-5 stays structurally impossible. Verified live: 33 numbers in draft, all 33 anchored.
+8. **`writer_grounding_rewrite` path exercised live** — first Writer pass had grounding misses on a few numbers; rewrite (with feedback list) recovered cleanly. Telemetry shows 28s + 26s = 54s of writing total for a clean post.
+9. **Final live verification:** `POST /run-pipeline` against Stack Overflow Survey 2024 source returns:
+   - `status=ready` in 113s
+   - 10-slide carousel, 33 numbers in draft, 0 unanchored, QG Phase A passes in 2.4s
+   - `post_queue` row persisted: `cab31b62-4b0b-4e95-b2d2-4e1feeba3840`, `status=ready`, `status_reason=pipeline_text_ready`
+   - Caption opens: *"El costo real de ignorar 65,000 respuestas es tomar decisiones con el mapa equivocado."* — 65,000 directly from anchor (the BUG-S58-5 negative-image test).
 
-2. **The existing chain has GOOD grounding architecture** — Writer has 5 explicit grounding rules, Editor defers fact-check to QG, QG has revise-then-kill loop with Anchor-Pinned Corrector. My initial "redesign the contract" instinct was wrong; the contract is sound.
+**Day 4 done criterion fully met.** The headline win: the Stack Overflow source — whose `65,000 desarrolladores` claim BUG-S58-5 falsely killed in production — now flows through the new chain to a published-ready draft. The bug class isn't just patched; it's structurally impossible by construction.
 
-3. **But fabrication failures still ship.** Read the actual claim-extraction code: it's Sonnet with strict "verbatim only" prompt, but **never mechanically verifies extracted claims appear in source**. Hypothesized this was the root cause.
+**External state changes:**
+- GitHub: 4 commits on main this session (Day 4 build + grounding contract fix + grounding two-tier fix + state docs).
+- Railway: 4 deploys, all ACTIVE.
+- Anthropic: ~25 inference calls (~6K-10K tokens each, prompt caching active). Total cost <$0.50 across all smokes.
+- Supabase: 1 post_queue row inserted (`cab31b62-4b0b-4e95-b2d2-4e1feeba3840`), no schema changes.
+- DECISIONS.md: D-013 appended.
 
-4. **Validation pass against historical kills.** Pulled SMOKE-S56-01 (Stack Overflow Survey kill, `failure_category=thin_source`). Trace: source HAD "65,000 developers", Sonnet extracted `numeric_claims: [{value: "65,000"}]` correctly, Writer cited "65,000" correctly. **Then the QG pre-flight grounding check flagged `caption:65,000 | body:65,000` as fabricated.** Corrector replaced with "masivamente". Phase A correctly killed "masivamente" as unanchored. failure_category="thin_source" — wildly misleading. So my "extractor hallucinates" hypothesis was wrong on this case; the bug is downstream.
+**New decisions logged:** D-013 (two-tier grounding, supersedes D-012's narrower interpretation).
 
-5. **Read QG's "Extract Reviews" code → found BUG-S58-5.** Asymmetric normalization: corpus replaces `,` with space (`"65,000"` → `"65 000"`), needle strips `,` entirely (`"65,000"` → `"65000"`). `corpus.includes(needle)` never matches for ≥1000 numbers with thousand-separator commas. Years pass through; thousands die.
+**Step durations (live, last good run):**
+- extract_claims: 12.2s
+- strategist: 15.2s
+- writer: 28.4s
+- writer_grounding_rewrite: 26.0s
+- editor: 16.2s
+- spanish_editor: 11.4s
+- qg_phase_a: 2.4s
+- **total: 112.9s end-to-end**
 
-6. **Patched live n8n QG via `n8n_update_partial_workflow`** with single-line fix (`corpusDigits` parallel to corpus, used in the membership check). Workflow stayed `active:true`. Verified patch landed.
-
-7. **Logged BUG-S58-5 to content_pipeline/KNOWN_ISSUES.md** with full trace, root cause code excerpt, fix shipped, prevention rule, triage note (any past `failure_category=thin_source` page with comma-separated numbers in source is suspect).
-
-8. **D-012 captured the broader lesson** for the new service: don't carry forward the re-fetch-and-re-normalize architecture; check against `anchor_claims` directly. Two normalize fns will drift again under future edits.
-
-9. **Built Day 3 modules.** All operating on the D-012 contract:
-   - `anthropic.ts` with prompt caching + cache_hit_rate telemetry
-   - `extract_claims.ts` with substring verifier (D-008 — drops Sonnet hallucinations before they become anchored)
-   - `grounding.ts` with single-normalize anchor membership (D-012 — BUG-S58-5 immune by construction)
-   - `/run-pipeline` smoke endpoint
-
-10. **Live smoke test against the historical false-kill source.** Stack Overflow Survey URL → extraction returns `{numeric_claims: [{value: "65,000", context: "polled more than 65,000 developers..."}], dropped: [], tier: "narrative-strong", status: "ok"}`. The number n8n killed is now an anchored claim. Day 4 grounding check will pass it mechanically.
-
-11. **Caching verified live.** Same source second call: 8.1s → 4.8s (~40% latency drop). System prompt caching works as designed. Sentry breadcrumbs have the precise rate.
-
-**What's next:**
-- Day 4: layer Strategist's strategy-decision (Node) + Writer (LLM, port from n8n) + pre-Phase-A grounding wired + Editor + Spanish + QG Phase A LLM.
-- Resume next session with `[MVP] resume`.
-
-**Blockers:** None.
-
-**New decisions logged:** D-012 (grounding on anchor_claims, not re-normalized source).
-
-**External state changes this session:**
-- n8n: workflow `ulIyyThcE1jLOJ1W` patched (BUG-S58-5 single-line fix, still `active:true`).
-- GitHub: 5 commits on main (state close + 0001 migration + 0002 + code modules + Day 3 foundation + D-012 + Day 3 build).
-- Railway: 2 deploys (after MASTER_ENCRYPTION_KEY set + after Day 3 push). Both ACTIVE, /health 200.
-- Anthropic: ~10 inference calls during smoke testing (~2K input + ~1K output tokens each — total <30K tokens, negligible cost).
-- Supabase: no schema changes this session (Day 2's 0001 + 0002 already applied).
-
-**Live verification:**
-- ✅ `POST /run-pipeline` returns valid ExtractionResult with verifier active.
-- ✅ Historical false-kill source produces verified `65,000` anchor claim — proves the new architecture catches what the old one couldn't.
-- ✅ Prompt cache hit on 2nd call — 40% latency drop confirms caching works.
+**Lessons (some belong promoted to feedback memory eventually):**
+- **Read the actual production code before porting.** Session 3's misread of the Strategist as deterministic would have produced a worse port if I'd built from memory. Pulling the JSON via MCP and reading it cost 5 min and changed the architecture.
+- **Smoke tests against historical bug sources beat synthetic tests.** The Stack Overflow Survey URL wasn't just a placeholder; it WAS the BUG-S58-5 trigger. Testing against the historical kill case is what surfaced the D-012 → D-013 contract gap.
+- **Architecture decisions decay if you don't periodically pressure-test them with real data.** D-012 looked complete after Session 3. Day 4's first real draft (with a curated subset narrower than the source's actual numeric density) immediately exposed its incomplete framing. That's a feature, not a bug — the senior posture says: ship, observe, refine the decision log.
 
 ## Next session
 
-**Day 4 — Writer + Editor + grounding wired end-to-end.** Resume with `[MVP] resume`. First actions:
-1. Build `src/pipeline/strategist.ts` — deterministic strategy-decision (pick pillar from brand_identity.pillars by heuristic match against topic; pick recipe from `anchor_weight.tier` + `pillar.preferred_recipes`; pick hook template + CTA from anchor lists). Pure Node, no LLM.
-2. Build `src/pipeline/writer.ts` — port the n8n Writer system prompt verbatim (already captured in this session's tool-results dump). Parameterize by brand_identity + extracted claims + strategy. Returns `{caption, slides, format}`.
-3. Wire `verifyDraftGrounding()` between Writer and Editor. Verdict revise → re-prompt Writer with offending list (1 attempt, then hand to QG Phase A).
-4. Port Editor (Rules A+C+D) + Spanish Editor + QG Phase A from n8n (all already captured in tool-results dumps).
-5. Persist `PostEnvelope` to `post_queue` at every step boundary (status transitions: pending → strategist → writer → editor → spanish_editor → qg → ready).
-6. Extend `/run-pipeline` to run the FULL chain end-to-end, not just extraction.
-7. Smoke test: same Stack Overflow source → through full chain → produces a real draft that passes grounding (the negative-image test of BUG-S58-5).
+**Day 5 — Notion sync + Designer.** Resume with `[MVP] resume`. First actions:
+1. Build `src/sync/notion-brand.ts` — read 9 Notion DBs filtered to Client=Hashtag, upsert `brand_identity` jsonb. Cron 5-min loop + `POST /admin/refresh-brand/:slug` endpoint.
+2. Verify Hashtag's full identity (~45 rows) populates from Notion.
+3. Re-run Day 4 smoke with the FULL identity — confirm Strategist now picks REAL pillar / recipe / hook / CTA names (not Sonnet-improvised names like `IDENTITY_CONFRONT — data-rich edition`).
+4. Begin Designer port — HCTI + Gemini + GCS + GDrive rendering chain from CD v3 archived workflow. Designer consumes the `WriterDraft` from `post_queue.payload`, produces slide image URLs, advances `status` to `designed`.

@@ -199,3 +199,29 @@ A `POST /admin/refresh-brand/:slug` endpoint forces an immediate sync — used b
 - Doing it Day 7 evening means the freshly-rotated 60-day token is at full lifespan when Day 8 publishing begins.
 
 **Status:** Active. Reminder belongs in TODO.md "Day 7" entry.
+
+## D-013 — Pre-Phase-A grounding: two-tier check (claims set + source_text fallback) — supersedes D-012
+
+**Date:** 2026-05-02
+**Decision:** Pre-Phase-A grounding (`verifyDraftGrounding`) verifies every number in a draft using TWO tiers, with the SAME single normalize fn on both sides:
+1. Fast set membership against `extraction.claims.numeric_claims` (full extraction, top-N capped at 15 per category).
+2. If miss: substring lookup against `extraction.source_text` (full Jina-fetched markdown, capped at 14k chars), normalized once.
+
+If either tier matches, the number is grounded. If both miss, it's flagged unanchored.
+
+**Why:**
+- Day 4 smoke surfaced that the Stack Overflow Survey 2024 page (data-rich, ~30 numerics in source) had legitimate Writer citations like `185 países`, `70% (year ago)`, `2018`, `2022`, `44%` that did NOT make the top-15 extraction cap. D-012's claims-only check killed the post even though every number was real.
+- The two-tier design preserves D-012's actual win (single normalize fn → BUG-S58-5 structurally impossible) while restoring fidelity for data-rich pages where extraction's hardcoded cap loses real source numbers.
+- Year mentions ("2018", "2022", "2023") in source paragraphs are common — they're contextually grounded but rarely make the curated `numeric_claims` set.
+- `source_text` is added to `ExtractionResult` (truncated to 14k chars). Stripped from envelope before persisting to `post_queue.payload` to keep jsonb compact across status transitions.
+
+**Architecture invariant preserved:** there is exactly ONE `normalizeForNumber()` function used on both sides of every comparison. BUG-S58-5 (asymmetric normalization) cannot recur regardless of which tier matches.
+
+**Note on Strategist's anchor_claims:** these remain Writer's "stay focused" prompt input and QG Phase A's LLM-side contract input. They're a CURATED subset (2–5 items), narrower than `source_claims`. They do NOT participate in pre-Phase-A grounding membership.
+
+**Alternatives rejected:**
+- Stricten Writer to only use `anchor_claims` (Strategist subset) — cuts data-rich post quality; Writer benefits from full source context to weave secondary stats.
+- Increase top-N cap from 15 to 50 — pushes the wall, doesn't move it; data-rich source articles routinely have 30+ numerics.
+- Re-fetch source in grounding (n8n's pattern) — costs ~1.5s per post on the QG path and reintroduces the failure mode if source URL becomes unreachable.
+
+**Status:** Active. Supersedes D-012's "claims-only" interpretation while keeping D-012's single-normalize principle. Verified live 2026-05-02 — Stack Overflow Survey 2024 source produced 33-number, 0-unanchored draft that reached `status='ready'`.

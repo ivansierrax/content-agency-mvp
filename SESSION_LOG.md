@@ -5,6 +5,103 @@
 
 ---
 
+## 2026-05-02 CST — Session 4 (Day 4 DONE — full text-side chain live)
+
+**Duration:** ~4h (deep — pulled five n8n workflows, ported six modules, surfaced and fixed two architecture bugs in flight).
+
+**What happened:**
+
+1. **Day 4 plan reframed up-front.** Pulled the n8n Strategist (`UR5qfUcOoO6djxIP`) via MCP and discovered Session 3's "Strategist is deterministic Node code" reading was wrong. The `Strategy Decision` node IS an LLM call (Sonnet, 100+ line system prompt). Flagged the misread to Ivan, proposed a faithful single-LLM-call port, got confirmation, proceeded.
+2. **Confirmed model strategy with Ivan:** Sonnet 4.6 across all chain steps for MVP consistency. Day 9 cost review can split per-step models on real telemetry. Logged to STATUS / open-questions.
+3. **Pulled all five n8n workflows via MCP** in parallel:
+   - Strategist v2 (`UR5qfUcOoO6djxIP`)
+   - Writer A3v3a (`uNFrmhzbddDfxFbU`)
+   - Editor Rules A3v3b (`WV8ZxfKnLllJjcRl`)
+   - Spanish Editor A3v3c (`2IrMf52AqP6sqgjg`)
+   - QG v2 (`ulIyyThcE1jLOJ1W`)
+   Read each one's actual code via `jq` extraction from the cached tool-results dumps.
+4. **Built six new modules:**
+   - `src/pipeline/strategist.ts` — single-topic LLM port + Context Package assembly. Prompt verbatim from n8n with "pick N from pool" + "different slot" logic stripped (we strategize one topic per call). Defensive against partial Brand 0 identity.
+   - `src/pipeline/writer.ts` — verbatim Writer prompt port + fresh/rewrite modes + structural validator that auto-empties `accent_text` if it's not a substring of `headline_text` (Rule [F] mechanical enforcement).
+   - `src/pipeline/editor.ts` — Rules A+C+D LLM with CTA-immutable enforcement. If Sonnet's `revised_draft` mutates the closing_cta slide or the caption-tail CTA line, those fields are restored from the original draft. Soft-fail keeps original on LLM error.
+   - `src/pipeline/spanish_editor.ts` — Mexican-Spanish LLM with the verbatim ~4KB accent prompt + length-ratio gate (output must be 0.85–1.15× input length) + double-accent revert (any word with ≥2 tildes → discard the LLM output, return original). Soft-fail.
+   - `src/pipeline/qg_phase_a.ts` — semantic LLM verifier against `anchor_claims`. Verdicts pass/revise/kill. Drops n8n's Anchor-Pinned Corrector (an extra LLM step Writer's patch mode handles equivalently with one fewer parse failure mode).
+   - `src/pipeline/chain.ts` — orchestrator wiring Extract → Strategize → Assemble CP → Writer → Grounding → (revise?) → Editor → Spanish → Phase A → (revise?) → ready. Persists `PostEnvelope` to `post_queue.payload` at every step boundary (status enum advances per step). Two revise budgets (pre-Phase-A grounding + Phase A LLM), one rewrite attempt each.
+5. **`/run-pipeline` HTTP endpoint extended** to run the full chain end-to-end. Backward-compatible `mode=extract_only` retained for Day 3 smoke parity.
+6. **Typecheck clean after the build.** Three small fixes: spread-order in Writer's slide patch (don't overwrite explicit fields), undefined-narrowing in editor's CTA-tail extractor.
+7. **Smoke test 1 → FAILED — Stack Overflow blog URL had moved.** First test against `https://stackoverflow.blog/2024/07/24/...` returned 404 from Jina. Bot-block detector correctly caught it as `rejected_fetch_failed`. Switched to live `https://survey.stackoverflow.co/2024/`.
+8. **Smoke test 2 → FAILED, surfaced contract bug.** Full chain ran (51s), extraction passed (data-rich, 15 numerics, 0 dropped — verifier perfect), Strategist picked pillar/recipe, Writer produced 8-slide carousel. But pre-Phase-A grounding KILLED it. Inspecting offenders: Writer cited `185 países`, `70%`, `44%` — REAL source numbers but outside Strategist's curated 5-claim anchor subset (76% / 65,000+ / 62% / 75% / 62.3%).
+9. **First fix: pass `cp.source_claims` to grounding instead of `cp.anchor_claims`.** Anchor_claims is Writer's "stay focused" prompt input; source_claims is the full extraction. Committed + pushed.
+10. **Smoke test 3 → 502 Railway edge timeout** (transient — service crashed mid-deploy). Retried after health probe.
+11. **Smoke test 4 → FAILED again.** This time offenders included `70% / 75% / 2018 / 44% / 15% / 2022 / 16% / 2023` — most of these appeared in source FULL TEXT but NOT in our top-15 extracted claims (n8n's hardcoded cap). The data-rich source had ~30 numerics; our extraction only kept top-15.
+12. **Architecture fix — D-013 (two-tier grounding).** D-012 said "use anchor_claims, not re-fetched source" — its real win was eliminating asymmetric normalization (BUG-S58-5). The "no re-fetch" framing was secondary and broke for data-rich pages. New design:
+    - Tier 1: fast set membership against `extraction.claims.numeric_claims` (full extraction, top-15).
+    - Tier 2: substring lookup against `extraction.source_text` (full Jina markdown, capped at 14k chars).
+    - Same single normalize fn on both sides → BUG-S58-5 stays structurally impossible regardless of which tier matches.
+    - `source_text` added to `ExtractionResult`. Stripped from envelope before persisting to `post_queue.payload` to keep jsonb compact.
+    - Logged D-013, supersedes D-012's narrower interpretation while preserving the single-normalize principle.
+13. **Smoke test 5 → 502 again** (Railway redeploy mid-flight). Health-probed, waited.
+14. **Smoke test 6 → SUCCESS.** Full chain reached `status='ready'` in 113s:
+    - 33 numbers in draft, 33 anchored, 0 unanchored.
+    - QG Phase A `verdict='pass'` in 2.4s.
+    - Caption opens: *"El costo real de ignorar 65,000 respuestas es tomar decisiones con el mapa equivocado."* — `65,000` directly from anchor (the BUG-S58-5 negative-image test).
+    - 10-slide carousel including data_card slides with verbatim source numbers.
+    - `writer_grounding_rewrite` path exercised live (first Writer pass had a few unanchored numbers; rewrite recovered cleanly with the feedback list).
+15. **Verified Supabase persistence:** `post_queue` row `cab31b62-4b0b-4e95-b2d2-4e1feeba3840`, `status='ready'`, `status_reason='pipeline_text_ready'`, `created_at`/`updated_at` consistent with the 113s chain duration.
+
+**Day 4 done criterion fully met.** The headline win: the Stack Overflow source — whose `65,000 desarrolladores` claim BUG-S58-5 falsely killed in production — now flows through the new chain to a published-ready draft. The bug class is structurally gone.
+
+**Step durations (live, last good run):**
+| Step | Duration |
+|---|---|
+| extract_claims | 12.2s |
+| strategist | 15.2s |
+| writer | 28.4s |
+| writer_grounding_rewrite | 26.0s |
+| editor | 16.2s |
+| spanish_editor | 11.4s |
+| qg_phase_a | 2.4s |
+| **TOTAL** | **112.9s** |
+
+**Lessons (some belong promoted to feedback memory eventually):**
+- **Read the actual production code before porting.** Session 3's misread of the Strategist as deterministic would have produced a worse port if I'd built from memory. Pulling the JSON via MCP and reading it cost 5 min and changed the architecture.
+- **Smoke tests against historical bug sources beat synthetic tests.** Stack Overflow Survey URL wasn't just a placeholder — it was the BUG-S58-5 trigger. Testing against the real historical kill case is what surfaced the D-012 → D-013 contract gap. A synthetic "happy path" smoke would have shown green and shipped a still-broken design.
+- **Decisions decay if you don't pressure-test them with real data.** D-012 looked complete after Session 3. Day 4's first real draft (with a curated Strategist subset narrower than the source's actual numeric density) immediately exposed its incomplete framing. The senior posture says: ship, observe, refine the decision log — D-013 supersedes D-012.
+- **n8n's `httpRequest` parameter binding (`nodeName` vs `node`)** — already learned in Session 3. Reapplied today: `n8n_get_workflow` calls used `id` cleanly; no MCP retry needed.
+- **Railway 502 mid-redeploy is transient. Wait + retry** — caught it twice today; never blocked us.
+
+**What's next:**
+- Day 5: Notion sync + Designer port. Resume with `[MVP] resume`.
+- Re-run Day 4 smoke after sync — confirm Strategist picks REAL Hashtag pillar/recipe/hook/CTA names instead of Sonnet-improvised names like `IDENTITY_CONFRONT — data-rich edition`.
+
+**Blockers:** None.
+
+**New decisions logged:** D-013 (two-tier grounding, supersedes D-012's narrower framing while keeping its single-normalize principle).
+
+**New files this session:**
+- `src/pipeline/strategist.ts`, `src/pipeline/writer.ts`, `src/pipeline/editor.ts`, `src/pipeline/spanish_editor.ts`, `src/pipeline/qg_phase_a.ts`, `src/pipeline/chain.ts`
+
+**Files updated this session:**
+- `src/pipeline/types.ts` (added Strategy + ContextPackage + WriterDraft + ContentType + Format + EngagementTrigger + CtaRole + BriefConstraint shapes; ExtractionResult now exposes optional `source_text`)
+- `src/pipeline/extract_claims.ts` (returns `source_text` truncated to 14k)
+- `src/pipeline/grounding.ts` (two-tier check, accepts optional `source_text`)
+- `src/index.ts` (`/run-pipeline` extended to full chain + `mode=extract_only` flag)
+- `DECISIONS.md` (D-013 appended)
+- `STATUS.md`, `TODO.md`, `SESSION_LOG.md` (this entry)
+
+**External state changes:**
+- GitHub: 4 commits on main (`080e099` Day 4 build / `572e410` grounding contract fix / `5d26441` two-tier grounding fix / state docs commit pending).
+- Railway: 4 deploys, all ACTIVE.
+- Anthropic: ~25 inference calls during build + smoke (~6K-10K tokens each, prompt caching active). Total cost <$0.50.
+- Supabase: 1 post_queue row inserted (`cab31b62-4b0b-4e95-b2d2-4e1feeba3840`), no schema changes.
+
+**Live verification:**
+- ✅ `POST /run-pipeline` against `https://survey.stackoverflow.co/2024/` returns `{ status: "ready", grounding.verdict: "pass", grounding.stats: { numbers_in_draft: 33, anchored: 33, unanchored: 0 } }` in 113s.
+- ✅ `post_queue` row persisted with `status='ready'`, `status_reason='pipeline_text_ready'`.
+- ✅ `writer_grounding_rewrite` path exercised in the same run — first-pass grounding flagged a few numbers; rewrite recovered cleanly.
+
+---
+
 ## 2026-05-01 → 2026-05-02 CST — Session 3 (Day 3 first iteration DONE + BUG-S58-5 production fix)
 
 **Duration:** ~3.5h (deep — included a full audit of the existing n8n chain + a P1 production bug fix + new module build).

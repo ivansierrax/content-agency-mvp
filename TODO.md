@@ -6,42 +6,27 @@
 ## Day 1 — ✅ DONE (2026-04-30 late-night)
 ## Day 2 — ✅ DONE (2026-05-01)
 ## Day 3 first iteration — ✅ DONE (2026-05-02 CST)
+## Day 4 — ✅ DONE (2026-05-02 CST)
 
-All Day 3 foundation steps complete. See SESSION_LOG.md Session 3 for full trace.
+Full text-side chain shipped. Stack Overflow Survey 2024 source produces 33-number, 0-unanchored, 10-slide draft reaching `status=ready` in 113s. See SESSION_LOG.md Session 4 for full trace.
 
-## Right now (Day 4 — Writer + Editor + grounding wired end-to-end)
+Architecture pivot during Day 4: Strategist is an LLM call (not deterministic Node) — Session 3's misread corrected. D-013 logged: pre-Phase-A grounding is two-tier (claims set + source_text fallback) preserving D-012's single-normalize win while handling the top-N extraction cap.
 
-1. [ ] Create `src/pipeline/strategist.ts` — deterministic strategy-decision. Inputs: brand_identity + extracted claims + anchor_weight. Logic:
-   - Pick pillar by heuristic topic-match against `brand_identity.pillars[].name + .example_topics + .description` (token overlap → highest-scoring pillar wins).
-   - Pick recipe from intersection of `pillar.preferred_recipes[]` and recipes eligible for `anchor_weight.tier` (data-rich → Death-Data eligible; narrative-thin → Punch-Single only; opinion-only → Identity-Confront).
-   - Pick hook template from `brand_identity.hooks[]` matching `recipe.engagement_trigger`.
-   - Pick CTA from `brand_identity.ctas[]` matching `pillar.short_code` (e.g. AI•Save for AI pillar).
-   - Compose `brief` (one sentence summarizing the angle).
-   - Output: `Strategy` object with all the fields Writer expects.
-   - Pure Node, no LLM. ~150 LOC.
+## Right now (Day 5 — Notion sync + Designer)
 
-2. [ ] Create `src/pipeline/writer.ts` — first LLM-author step. Port the n8n Writer system prompt verbatim from this session's tool-results dump (`mcp-n8n-mcp-n8n_get_workflow-1777668912934.txt` / "Build Writer Prompt" node, ~250 LOC of prompt). Parameterize by `brand_identity + extracted_claims + strategy`. Use `complete()` from `lib/anthropic.ts` with `step: 'writer'` for Sentry telemetry. Returns `{caption, slides, format}`. ~200 LOC including parsing + retry on JSON parse failure.
+1. [ ] Create `src/sync/notion-brand.ts` — read the 9 brand DBs filtered to Client=<brand>, upsert `brand_identity` jsonb via `upsertBrandIdentity()`. Each DB queried with `filter: { property: "Client", select: { equals: <brand_name> } }` so we don't fight the substring search bug from Day 2. Output shape matches `BrandIdentity` interface in `db/types.ts` — categories: themes, pillars, image_rules, blueprints, recipes, ctas, hooks, lexicon, photo. Pure Node, ~250 LOC.
 
-3. [ ] Wire `verifyDraftGrounding()` between Writer and Editor. Slice the draft into labeled regions (caption, slide_N_headline, slide_N_body, slide_N_accent, data_card numbers). Pass to grounding fn. Verdict:
-   - `pass` → continue to Editor.
-   - `revise` → re-prompt Writer with offending[] list (1 attempt, then hand to QG Phase A).
-   - `kill` → mark post_queue.status = 'failed', failure_category='grounding_pre_a'.
+2. [ ] Cron-style scheduling — every 5 min, refresh all `active`/`onboarding` brands. Use `setInterval` with skew-and-jitter to avoid thundering herd. Skip if last sync was <2 min ago. ~50 LOC.
 
-4. [ ] Port Editor Rules A+C+D from n8n (workflow `WV8ZxfKnLllJjcRl`, "Editor: Rules A+C+D" node). Already captured in this session's MCP dump. ~120 LOC.
+3. [ ] `POST /admin/refresh-brand/:slug` endpoint — on-demand sync trigger. Returns the count of rows synced per category + the new `brand_identity_synced_at` timestamp. ~30 LOC.
 
-5. [ ] Port Spanish Editor from n8n (workflow `2IrMf52AqP6sqgjg`). The 4KB system prompt is the value here — it's hard-won linguistic knowledge. ~80 LOC + the prompt.
+4. [ ] **Verify Hashtag's full identity populates from Notion** — should pull all ~45 rows (1 theme + 3 pillars + 4 image_rules + 1 blueprint + 6 recipes + 15 ctas + 12 hooks + 2 lexicon + 1 photo).
 
-6. [ ] Port QG Phase A from n8n (workflow `ulIyyThcE1jLOJ1W`, "Fact Check Phase A" node). LLM verifier sends draft + anchor_claims to Sonnet, returns pass/revise/kill. Reuse the verdict shape we already have. ~150 LOC.
+5. [ ] **Re-run Day 4 smoke** with FULL identity loaded — confirm Strategist now picks REAL pillar/recipe/hook/CTA names from the synced Hashtag identity (not Sonnet-improvised names like `IDENTITY_CONFRONT — data-rich edition` from the partial-Brand-0 run).
 
-7. [ ] Persist `PostEnvelope` to `post_queue` at every step boundary. Use `enqueuePost` (idempotent on brand_id + idempotency_key) at /run-pipeline entry, then `updatePostStatus` with `payloadPatch` at each step transition. Status enum already in 0001_init.sql.
+6. [ ] Begin Designer port — HCTI + Gemini + GCS + GDrive rendering chain from CD v3 archived workflow `mUbLOTYjNCl776AT` (canonical) or already-shipped Designer A4 (`8KYkBaKg3yeRummd`). Designer consumes the `WriterDraft` from `post_queue.payload` (status=ready) → produces slide image URLs → advances `status` to `designed`. Day 5 may not finish all of Designer; if not, the priority is Notion sync + verified resync, with Designer carrying into Day 5 PM or Day 6 AM.
 
-8. [ ] Extend `POST /run-pipeline` to run the FULL chain end-to-end. Body unchanged. Response: full PostEnvelope + final status.
-
-9. [ ] **Smoke test:** same Stack Overflow source → through full chain → produces a real draft that passes Phase A. This is the negative-image test of BUG-S58-5 — proves the new architecture not only avoids the bug but ships the post the old architecture wrongly killed.
-
-10. [ ] If the smoke test ships clean, persist the result to `post_results` (mark as test, not real publish). Then we have a full Day 4 end-to-end working artifact.
-
-**Day 4 done = `/run-pipeline` runs Brand 0 + Stack Overflow Survey through the full chain to status=ready, draft cites "65,000" correctly anchored, PostEnvelope persisted in post_queue, no false-positive grounding kill.**
+**Day 5 done minimum = Hashtag identity fully synced from Notion + Day-4 smoke re-runs with REAL pillar/recipe/hook/CTA names. Designer port can spill to Day 6.**
 
 ## This week (Week 1 — rest of)
 
@@ -58,8 +43,8 @@ All Day 3 foundation steps complete. See SESSION_LOG.md Session 3 for full trace
 
 ## Open questions (need answer before relevant day)
 
-- **Day 4:** Use Sonnet 4.6 (`claude-sonnet-4-6`) for ALL chain steps in MVP, or Haiku for lighter steps (Editor/Spanish Editor/QG)? Default plan: Sonnet across the board for consistency; revisit on Day 9 cost review.
-- **Day 4:** When pre-Phase-A grounding says "revise", how many Writer revision attempts before handing to QG Phase A? Default: 1 (matches existing n8n behavior).
+- **Day 4 — RESOLVED:** Sonnet 4.6 across all chain steps for MVP (consistency > per-step optimization). Day 9 cost review will split if telemetry justifies it.
+- **Day 4 — RESOLVED:** 1 Writer revision attempt for pre-Phase-A grounding revise; same for Phase A revise. Both budgets exercised live without runaway cost.
 - **Day 5:** Notion API token — generate a new Notion integration scoped to the 9 brand DBs (and the Strategy parent page), or reuse existing one? Default: new dedicated integration `content-agency-mvp-sync` for clean revoke path.
 - **Day 7 PM:** Maria's availability for first onboarding rehearsal? (target: Day 10 afternoon).
 - **Day 10:** Which real brand is #1? (decide by end of Week 1).
@@ -86,4 +71,5 @@ All Day 3 foundation steps complete. See SESSION_LOG.md Session 3 for full trace
 - Skipping prompt caching.
 - Bypassing the per-brand circuit breaker pattern.
 - Reading brand identity directly from Notion at pipeline-time (would supersede D-010).
-- Re-introducing re-fetch-and-re-normalize grounding architecture (would supersede D-012).
+- Re-introducing re-fetch-and-re-normalize grounding architecture (would supersede D-013).
+- Splitting models per chain step (e.g. Haiku for Spanish Editor) — should be evidence-based on Day 9 cost telemetry.
