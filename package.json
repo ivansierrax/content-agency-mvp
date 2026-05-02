@@ -14,7 +14,9 @@
     "smoke": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'lint TBD (Day 9 reliability hardening)'",
-    "test": "echo 'tests TBD'"
+    "test": "echo 'tests TBD'",
+    "onboard": "tsx scripts/onboard-brand.ts",
+    "store-ig-token": "tsx scripts/store-ig-token.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
