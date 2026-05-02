@@ -1,26 +1,34 @@
 # STATUS — content_agency_mvp
 
-**Day 6 (2026-05-02 CST) — ✅ DONE. Designer port live. Full chain end-to-end produces a 7-slide carousel with public Supabase Storage URLs in 165s. Phase A revise loop exercised live (initial revise → Writer rewrite → Editor → Spanish → Phase A retry → pass). All 7 slide types render correctly: typography (dark + light), person_photo (Gemini-generated portrait), data_card, object_photo (Gemini-generated scene), closing_cta.**
+**Day 7 (2026-05-02 CST) — ✅ AUTOMATABLE PORTION DONE. Multi-brand isolation verified clean for creative inventory. Onboarding CLI + token-store CLI built and tested. IG token rotation runbook written. The Hashtag IG token rotation itself is BLOCKED on Ivan running the runbook (manual OAuth + MFA, ~15-20 min) — the scheduled verification agent on 2026-05-09 09:00 CST (`trig_017kbLj7ju1Q8Aq7d2WBh5c8`) will check the evidence trail.**
 
 ## Where we are
 
-End of Day 6. The Node service has the **complete text + image-rendering pipeline** running on real synced identity:
+End of Day 7's automatable portion. The agency platform now has the operational tooling to onboard new brands safely:
 
-- ✅ Day 1-5: HTTP server, data layer, full text-side chain, Notion sync.
-- ✅ **Day 6 (Session 6):**
-  - Designer module (~500 LOC): photo prompt enrichment from `brand_identity.photo` (deterministic, weighted-pool port from n8n) → Gemini 2.5 Flash Image parallel calls for person_photo / object_photo → 6 HTML templates verbatim from production → HCTI Hosted render @ 1080×1350×2 dpi → Supabase Storage upload → public URL written back to slide.url.
-  - Per-slide error isolation: one HCTI/Gemini failure doesn't kill the whole carousel; partial-fail tagged in `status_reason`.
-  - Status flow extended: `qg → designer → ready` (was `qg → ready`).
-  - Supabase Storage bucket `mvp-content` (public, 10MB cap, image MIME) created via REST.
-  - D-015 logged: storage = Supabase Storage (not GDrive). Auth simplicity + IG-publish friendliness + no new infra.
-- ✅ **Verified live:** smoke test against `https://survey.stackoverflow.co/2024/` reaches `status='ready'` in 165s with **7/7 slides rendered + uploaded** with Supabase public URLs returning `200 image/png`. Photo slides (5.5–6.0 MB) embed Gemini-generated backgrounds; text slides (524 KB–633 KB) typography-only.
+- ✅ Day 1-6: HTTP server, data layer, full text+image chain, Notion sync, Designer.
+- ✅ **Day 7 (Session 7):**
+  - **Multi-brand isolation test:** synthetic Brand 1 ('testbrand', empty identity) reached `status='ready'` in 123s. Strategist picked Sonnet-improvised names with all Postgres IDs null. No leak from Brand 0's curated inventory. `brand_id`-keyed reads work as designed.
+  - **Architectural finding (not a bug):** Notion data_sources query rejects unknown `Client` select option values with HTTP 400. The onboarding CLI must verify the option exists before inserting Postgres rows.
+  - **Onboarding CLI** (`scripts/onboard-brand.ts`, ~200 LOC): preflight check across all 8 Notion DBs → idempotent `brands` + `brand_configs` upserts → trigger first sync → report counts+warnings. Failure path tested (exit 3, prints fix instructions).
+  - **Token-store CLI** (`scripts/store-ig-token.ts`, ~150 LOC): brand lookup → Graph API `debug_token` verify (is_valid + ≥50 days remaining) → AES-256-GCM encrypt → DB update. `--no-verify` escape hatch for rate-limit retries.
+  - **IG token rotation runbook** (`runbooks/ig-token-rotation.md`): full OAuth-dance recipe from Graph API Explorer through long-lived token exchange to CLI store. Common failure modes documented.
+  - **`testbrand` archived** (status=paused, archived_at set, notion_client_filter cleared) so cron sync skips it cleanly.
+  - **Soft theme-leak finding logged for Day 9:** Brand 1's rendered slides showed 'HASHTAG AGENCIA' header/footer because the default theme fallback is Hashtag-hardcoded. NOT a creative-inventory leak; not blocking. Day 9 reliability: brand-correct theme fallback when `brand_identity.themes` is empty.
 
-## What we don't have yet (Day 7+)
+## What's blocked on Ivan (Day 7 PM)
 
-- ⚪ **Multi-brand isolation test** — duplicate Brand 0 to a synthetic Brand 1 with different `notion_client_filter`, verify Strategist for Brand 1 cannot see Brand 0's pillars. Day 7 AM (deferred from Day 6 per scope priority — Designer was the bigger lift).
-- ⚪ **Onboarding CLI** — Day 7 AM after isolation test.
-- ⚪ **Hashtag IG token rotation** Day 7 PM (per D-011).
-- ⚪ **Per-brand publishing** (IG Graph API publish path consuming the Designer's URLs) Day 8.
+- ⏳ **Hashtag IG token rotation (D-011).** Ivan must run the runbook manually:
+  1. Open Graph API Explorer, generate fresh short-lived Page token with required scopes.
+  2. Exchange for long-lived 60-day Page token via `/oauth/access_token` + `/me/accounts`.
+  3. `debug_token` to verify is_valid + 60-day expiry.
+  4. `npm run store-ig-token -- --slug=hashtag --token=<token> --ig-account=<id> --fb-page=<id>`
+  5. Append rotation log line to CREDENTIALS.md + SESSION_LOG.md, commit.
+- The scheduled verification agent (`trig_017kbLj7ju1Q8Aq7d2WBh5c8`, fires 2026-05-09T15:00:00Z) will read the evidence trail and ping if rotation didn't happen.
+
+## What we don't have yet (Day 8+)
+
+- ⚪ **IG Graph API publishing path** — Day 8. Consume `WriterDraft.slides[].url` (Supabase public PNG URLs) → IG `/me/media` create → `/me/media_publish` flip. Carousel media-container child sequencing per IG semantics. Anti-spam throttle (≤5 publish probes/account/hour during dev).
 - ⚪ **Reliability hardening** Day 9.
 - ⚪ **E2E + first real brand onboarded** Day 10.
 
@@ -30,89 +38,60 @@ End of Day 6. The Node service has the **complete text + image-rendering pipelin
 |---|---|
 | Plan | 🟢 |
 | Architecture | 🟢 15 active decisions (D-001 through D-015) |
-| Code | 🟢 full text + image chain live, typecheck clean |
+| Code | 🟢 full text+image chain + onboarding/token CLIs live, typecheck clean |
 | Infrastructure | 🟢 Railway → Sentry → Supabase (DB + Storage) → Anthropic + Notion + Gemini + HCTI |
-| Brand 0 seeded | 🟢 FULL identity synced from Notion (Day 5) |
-| First extraction live | 🟢 (Day 3) |
-| First full draft text-ready | 🟢 (Day 4) |
-| Pipeline running on real Hashtag identity | 🟢 (Day 5) |
-| **First fully-rendered carousel with public URLs** | 🟢 (Day 6) |
-| Multi-brand isolation verified | ⚪ Day 7 target |
+| Brand 0 (Hashtag) | 🟢 FULL identity synced; **awaiting IG token rotation (manual)** |
+| Multi-brand isolation | 🟢 verified clean for creative inventory |
+| First fully-rendered carousel | 🟢 (Day 6) |
+| Onboarding CLI | 🟢 (Day 7) |
+| **IG token rotation** | ⏳ **BLOCKED on Ivan running the runbook** |
 | Per-brand publishing | ⚪ Day 8 target |
 | First real brand onboarded | ⚪ Day 10 target |
 | Live with paying brand | ⚪ Day 11-14 target |
 
 ## Current blockers
 
-None.
+- **Hashtag IG token rotation** — manual OAuth dance per `runbooks/ig-token-rotation.md`. Day 7 PM atomic session. Day 8 publishing cannot start without this.
 
 ## Last session
 
-**2026-05-02 CST (Session 6 — Day 6 DONE — Designer live, full chain ships designed carousels):**
+**2026-05-02 CST (Session 7 — Day 7 automatable portion DONE):**
 
-1. **Senior pre-build calls up-front:** HCTI hosted (matches production), Gemini 2.5 Flash Image (matches production code, NOT Gemini 3 Pro — that's the text rule), GDrive **rejected** for storage in favor of Supabase Storage (D-015 — auth simplicity + IG-publish friendliness + no new infra).
-2. **Pulled Designer A4 (`8KYkBaKg3yeRummd`) via MCP** + extracted "Build Render Jobs" code (19KB) via `jq`. Read the actual production code: photo prompt enrichment from photo_config strings ("European 50% · Asian 30%" weighted-pool format), Gemini 2.5 Flash Image parallel calls, 6 HTML templates inline, HCTI render, GDrive upload.
-3. **Created Supabase Storage bucket** `mvp-content` via single REST call: `POST /storage/v1/bucket` with `{public:true, file_size_limit:10MB, allowed_mime_types:[png,jpeg,webp]}`. Returned 200 in <1s.
-4. **Built `src/pipeline/designer.ts`** (~500 LOC, faithful port):
-   - Prompt enrichment: deterministic weighted-pool picks for ethnicity / wardrobe / setting / time of day / palette / surface (port of n8n's `pickWeighted` + `parseEthnicity` + `parseWardrobe` + `parseList`).
-   - `generateAllPhotos()`: `Promise.allSettled` parallel Gemini calls; image base64 attached to a per-index map.
-   - 6 HTML template functions (typography_dark, typography_light, person_photo, object_photo, data_card, closing_cta) — verbatim port; only diff is they take a `ThemeColors` object built from `brand_identity.themes[0]` instead of hardcoded.
-   - HCTI render → download PNG bytes → upload to Supabase Storage → return public URL.
-   - Per-slide error isolation: one HCTI/Gemini fail doesn't kill the carousel.
-5. **Wired Designer into `chain.ts`** after QG Phase A pass: status flow now `qg → designer → ready`. All-fail → mark failed with `failure_category='designer_all_failed'`. Partial-fail → status_reason names the count (`designer_partial: 5 ok, 2 failed`).
-6. **Added 3 Railway env vars** via the per-variable form (HCTI_USER_ID + HCTI_API_KEY + GEMINI_API_KEY). Deployed.
-7. **Committed + pushed** (`47abe86` Day 6 build, 5 files, 579 insertions).
-8. **Day 6 smoke test against `https://survey.stackoverflow.co/2024/`:**
-   - `status='ready'` in **165s end-to-end**.
-   - **7/7 slides rendered** with public URLs, 0 failed.
-   - Phase A revise loop exercised live (initial revise → Writer rewrite → Editor → Spanish → Phase A retry → pass) — never seen in a previous smoke run.
-   - All 6 slide types covered: typography_dark + typography_light + person_photo + data_card + object_photo + closing_cta.
-9. **Visual verification of slide 01, 02, 05:**
-   - Slide 01 (typography_dark): clean hook with red `YA MURIÓ` accent, 65,437 + 185 países anchored. Spanish correct.
-   - Slide 02 (person_photo): Gemini editorial portrait of a person at a laptop in a modern office with natural light. Brand text overlay clean.
-   - Slide 05 (object_photo): Gemini interpreted MySQL-vs-PostgreSQL as analog measurement gauges — creative + on-brand. Real source numbers (59% / 49% / 33% / 2018) anchored. Source attribution ("Según Stack Overflow") present.
-10. **D-015 logged** documenting storage choice rationale.
+1. **Multi-brand isolation test** — inserted synthetic Brand 1 directly via Supabase REST (slug='testbrand', notion_client_filter='TestClient', brand_identity={}). Triggered `/admin/refresh-brand/testbrand` — surfaced architectural finding: Notion data_sources query returns HTTP 400 with helpful "Available options: 'Hashtag'" hint when select option doesn't exist. **NOT a bug** — the right contract; logged as onboarding precondition.
+2. **Pipeline run against Brand 1** (empty identity, sync skipped) reached `status='ready'` in 123s. **Strategist picked Sonnet-improvised names with all Postgres IDs null** — no Brand 0 leak. Brand-id-keyed reads from `brand_configs.brand_identity` work as designed.
+3. **Soft theme-leak finding** — Brand 1's rendered slides showed 'HASHTAG AGENCIA' header/footer + `ivan@hashtag.com.mx` because `pickThemeColors()` falls back to hardcoded Hashtag values when `brand_identity.themes` is empty. NOT a creative-inventory leak; visual-only. Logged for Day 9.
+4. **Onboarding CLI** built with the preflight as the first check. Tested both paths:
+   - Good filter (`Hashtag`): all 8 DBs accept, idempotent on existing rows, sync ran in 1.3s for 80 rows. Re-run-safe.
+   - Bad filter (`DoesNotExist`): all 8 DBs reject, prints "available options: Hashtag" cleanly + tells Ivan exactly what to do, exits code 3. No DB mutations on failure.
+5. **Token-store CLI** built. `debug_token` verify enforces 50-day floor. AES-256-GCM encrypt via existing `crypto.ts`. UPDATE-only on `brand_configs.ig_token_encrypted` (+ optional ig_business_account_id, fb_page_id). Plaintext token never touches disk.
+6. **IG rotation runbook** written (`runbooks/ig-token-rotation.md`). Full OAuth dance + common failure modes + cadence guidance (rotate at day 50 for 10-day safety margin).
+7. **testbrand archived** (status=paused, archived_at, notion_client_filter cleared) so the 5-min cron sync doesn't 400 every 5 min on the dead filter.
+8. **D-011 actual rotation: BLOCKED on Ivan** running the runbook. Cannot automate the OAuth + MFA dance. Scheduled verification agent (trig_017kbLj7ju1Q8Aq7d2WBh5c8) will catch it on 2026-05-09 09:00 CST.
 
-**Day 6 done criterion fully met.** The pipeline now produces production-quality finished carousels end-to-end. Day 8 publishing has everything it needs (public PNG URLs + IG-Graph-API-friendly content type).
+**Day 7 done criterion** for the automatable scope met. The agency platform can now safely onboard a new brand with one CLI invocation (after the human has added the Notion select option). Token rotation is one CLI invocation away too — only the OAuth dance is human.
 
-**Step durations (Day 6 smoke, full chain including Designer + Phase A revise loop):**
-| Step | Duration |
-|---|---|
-| extract_claims | 13.3s |
-| strategist | 15.0s |
-| writer | 22.2s |
-| editor | 18.3s |
-| spanish_editor | 9.7s |
-| qg_phase_a | 7.8s |
-| writer_phase_a_rewrite | 21.3s |
-| editor_phase_a_rewrite | 16.6s |
-| spanish_editor_phase_a_rewrite | 9.8s |
-| qg_phase_a_retry | 3.0s |
-| **designer** | **27.0s** (7 slides, 2 Gemini calls + 7 HCTI renders + 7 storage uploads) |
-| **TOTAL** | **165.8s** |
-
-**Lessons:**
-- **Read the production code BEFORE choosing dependencies.** I almost reached for GCS by default; pulling Designer A4 via MCP + reading the actual code revealed (a) HCTI is the right rendering engine, (b) Gemini's specific model name, (c) GDrive's auth complexity that I could sidestep by switching to Supabase Storage — same project, already authenticated.
-- **Per-slide error isolation matters.** A single Gemini timeout (30s+) shouldn't kill a 7-slide carousel. The `for` loop with try/catch + `failures[]` accumulator is the right pattern; partial-fail status_reason gives Day 8 publishing the signal it needs.
-- **Public bucket + deterministic path = simplest possible URL story.** No signed URLs, no expiration, no extra round-trips. IG Graph API on Day 8 will accept these directly.
-- **Phase A revise loop validated live for the first time.** Day 4-5 smokes never tripped Phase A's `revise` verdict; Day 6's first run did. The Writer rewrite path + Editor + Spanish + Phase A retry all worked cleanly. ~70s extra latency for the recovery, all four steps' duration captured in telemetry.
+**Lessons (some belong promoted to feedback memory eventually):**
+- **Failure-path testing surfaces real architecture findings.** I built the onboarding CLI with preflight INSTINCTIVELY because of the morning's Notion 400. If I'd skipped the isolation test (or only tested the happy path), I'd have shipped a CLI that fails opaquely on first onboarding attempt for any new brand. The 30 min spent on the isolation test paid for the next 50 brands' onboardings.
+- **Soft visual leaks ≠ data leaks.** Brand 1's slides had Hashtag branding because the theme fallback is hardcoded. That's an embarrassment if shipped, but the data layer (creative inventory, IDs, brand_id) is clean. Naming this distinction publicly (in this STATUS) prevents future-me from over-reacting and gold-plating Day 7.
+- **The runbook IS the work.** I cannot rotate the token, but I can make the rotation a 5-minute task instead of a 1-hour fumble. The runbook + CLI + verify-with-debug_token + 50-day floor is what actually de-risks BUG-S58-4 going forward.
 
 **External state changes:**
-- GitHub: 1 commit on main (`47abe86` Day 6 Designer port). State-docs commit pending.
-- Railway: 3 env vars added (HCTI_USER_ID, HCTI_API_KEY, GEMINI_API_KEY); 1 deploy ACTIVE.
-- Supabase: bucket `mvp-content` created (public, image MIME, 10MB cap); 7 slides uploaded under `hashtag/b0ebe1ca-8f1a-44bb-a584-9329cc32fab5/` for the test post.
-- Anthropic: ~6 inference calls (Strategist + Writer×2 + Editor×2 + Spanish×2 + Phase A×2). Caching active.
-- Gemini: 2 image-gen calls (person_photo + object_photo). ~30s each at the API tail.
-- HCTI: 7 render calls (one per slide). ~3s each.
+- GitHub: 1 commit on main (`ed31557` Day 7 isolation test + CLIs + runbook). State-docs commit pending.
+- Supabase: testbrand inserted, then archived/paused/filter-cleared. brand_identity column for testbrand set to `{}`.
+- Railway: no new env vars. No deploys (CLIs are local-only / dev-only tools).
+- One extra `post_queue` row from the isolation test (`12d02e0b-134b-4a34-bdbe-ca5a467b9695`, brand_id=testbrand-uuid, status=ready). Safe to leave for forensic value.
 
-**New decisions logged:** D-015 (Supabase Storage for slide PNGs).
+**New decisions logged:** None this session. Soft theme-leak finding queued for Day 9 (no D-### until I make the change).
 
 ## Next session
 
-**Day 7 — Multi-brand isolation test + onboarding CLI + Hashtag IG token rotation.** Resume with `[MVP] resume`.
+**Day 8 — IG Graph API publishing path.** Resume with `[MVP] resume`.
+
+**Hard precondition:** Hashtag IG token rotation must be complete (Ivan runs the runbook + CLI). Verification agent fires 2026-05-09 09:00 CST and will alarm if not done.
 
 First actions:
-1. **Multi-brand isolation test:** insert synthetic Brand 1 with `notion_client_filter='TestClient'` (which doesn't exist in Notion → 0 rows on sync). Verify Strategist refuses to run for Brand 1 (or runs with empty identity — both are valid outcomes, but they MUST NOT silently leak Brand 0's pillars).
-2. **Onboarding CLI** (~200 LOC): `npm run onboard <slug> <name> <client_filter>` creates the brand row + brand_config row + triggers initial Notion sync. Replaces the manual `INSERT INTO brands` + `UPDATE brand_configs` dance.
-3. **Hashtag IG token rotation (atomic session per D-011):** OAuth dance via Graph API Explorer to mint a fresh 60-day token; encrypt + write to `brand_configs.ig_token_encrypted`; verify with a `debug_token` call.
-4. Day 8 prep: scan IG Graph API publishing semantics; queue Day 8 work items.
+1. Read `engineering_decisions.md` IG-publish patterns (BUG-S58-4 / anti-spam throttle / carousel-vs-single ordering).
+2. Build `src/pipeline/publisher.ts` — consume a `post_queue` row at `status='ready'`, call IG Graph API `/me/media` for each slide URL (carousel children) → `/me/media_publish` to flip the parent → write back ig_media_id + ig_permalink to `post_results`. Status flow: `ready → publishing → published`.
+3. Reuse n8n's Publisher A6 (`8jSmVKk7ezw1s5No`) carousel ordering rules verbatim — already proven against BUG-S58-1 dual-account routing.
+4. Add Day 8 cron: poll `post_queue` for `status='ready' AND scheduled_for <= now()` every 5 min, kick off publisher.
+5. Smoke test: schedule the existing Day-6 Stack Overflow `post_queue_id` for 5 min in the future, confirm it auto-publishes to `@agenciahashtag_` (or `@hashtag_estudio` per dual-account routing).

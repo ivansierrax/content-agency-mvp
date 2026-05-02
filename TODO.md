@@ -9,30 +9,45 @@
 ## Day 4 — ✅ DONE (2026-05-02 CST)
 ## Day 5 (minimum) — ✅ DONE (2026-05-02 CST)
 ## Day 6 — ✅ DONE (2026-05-02 CST)
+## Day 7 (automatable portion) — ✅ DONE (2026-05-02 CST)
 
-Designer port shipped. Stack Overflow Survey 2024 source produces a 7-slide rendered carousel with public Supabase Storage URLs in 165s end-to-end. Phase A revise loop exercised live for the first time and recovered cleanly. All 6 slide types render correctly: typography_dark, typography_light, person_photo (Gemini portrait), data_card, object_photo (Gemini scene), closing_cta. See SESSION_LOG.md Session 6 for full trace + slide samples.
+Multi-brand isolation verified clean for creative inventory (Brand 1 with empty identity ran end-to-end, Strategist picked Sonnet-improvised names, all Postgres IDs null — no Brand 0 leak). Onboarding CLI + token-store CLI shipped and tested both happy + failure paths. IG token rotation runbook written. Architectural finding logged: Notion data_sources query rejects unknown `Client` select options with HTTP 400 — onboarding CLI's preflight catches this. Soft theme-leak (Hashtag-hardcoded fallback) logged for Day 9.
 
-D-015 logged: Supabase Storage chosen over production's GDrive for auth simplicity + IG-publish friendliness + no new infra.
+Day 7 PM IG token rotation itself is **BLOCKED on Ivan** running the runbook (manual OAuth + MFA, ~15-20 min). Verification agent `trig_017kbLj7ju1Q8Aq7d2WBh5c8` fires 2026-05-09 09:00 CST and will alarm if not done.
 
-Multi-brand isolation test deferred to Day 7 AM (Designer was the bigger lift; senior call to ship Designer cleanly rather than rush isolation work).
+## Right now (Day 8 — IG Graph API publishing path)
 
-## Right now (Day 7 — Multi-brand isolation + onboarding CLI + Hashtag IG token rotation)
+**HARD PRECONDITION:** Hashtag IG token rotation complete. Run `runbooks/ig-token-rotation.md` first.
 
-1. [ ] **Multi-brand isolation test (Day 6 deferred):** insert synthetic Brand 1 via direct Postgres INSERT — `slug='testbrand'`, `name='Test Brand'`, `status='onboarding'` + `brand_configs` row with `notion_client_filter='TestClient'` (a string that doesn't exist as a `Client` select option in any of the 8 Hashtag DBs). Trigger `POST /admin/refresh-brand/testbrand` — should return 0 rows in every category. Then `POST /run-pipeline` for Brand 1 with the SO Survey source — should either (a) fail loudly because Strategist can't pick from empty pillars, or (b) run with Sonnet-improvised names. Verify Brand 1's chosen names + IDs are NOT Brand 0's. Document the outcome.
+1. [ ] Read `engineering_decisions.md` IG-publish patterns. Specifically:
+   - BUG-S58-4 (silent token expiry → daily debug_token check required)
+   - Anti-spam throttle (≤5 publish probes/account/hour during dev)
+   - Carousel-vs-single ordering rules (n8n Publisher A6 has these)
+   - Dual-account routing (BUG-S58-1 fix already in workflow `8jSmVKk7ezw1s5No`)
 
-2. [ ] **Onboarding CLI (`scripts/onboard-brand.ts` or `npm run onboard`):** ~150 LOC. Inputs: brand slug, brand name, notion_client_filter, optional ig_business_account_id. Steps: insert `brands` row → insert `brand_configs` row with the filter set → POST to local `/admin/refresh-brand/:slug` to trigger first sync → report counts + warnings. Replaces the manual `INSERT INTO` dance. Day 7 PM token-rotation step uses this same CLI.
+2. [ ] Build `src/pipeline/publisher.ts` (~250 LOC):
+   - Input: `post_queue` row at `status='ready'` with all slide URLs populated.
+   - For each slide URL: `POST /<ig_business_account>/media` (children), collect `id` of each.
+   - `POST /<ig_business_account>/media` (parent carousel container, `media_type=CAROUSEL`, `children=[...]`).
+   - Poll status of parent container until `FINISHED` (anti-spam: <5 polls/min/account).
+   - `POST /<ig_business_account>/media_publish?creation_id=<parent_id>`.
+   - INSERT into `post_results` with `ig_media_id`, `ig_permalink`, `published_at`. Use existing `recordPublishSuccess()`.
+   - Status flow: `ready → publishing → published`. Failure → `published_attempts++`, `last_error`, retry on next cron tick.
 
-3. [ ] **Hashtag IG token rotation (atomic session per D-011):** OAuth dance via Graph API Explorer to mint a fresh 60-day Page-token. Encrypt with `MASTER_ENCRYPTION_KEY` via `src/lib/crypto.ts`. Write to `brand_configs.ig_token_encrypted` for Brand 0. Verify with a `debug_token` Graph API call (must show `is_valid:true`, `expires_at:60-days-out`, `scopes:[pages_show_list,...]`). Log rotation in CREDENTIALS.md.
+3. [ ] Add Day 8 cron in `src/sync/scheduler.ts` or new `src/publish/scheduler.ts`: every 5 min, poll `post_queue` for `status='ready' AND scheduled_for <= now()`, kick off publisher per row. Sequential per brand (anti-spam), parallel across brands.
 
-4. [ ] **Day 8 prep notes** — scan `engineering_decisions.md` for IG-publish gotchas already documented (BUG-S58-4, anti-spam throttle, carousel-vs-single ordering rules). Queue Day 8 work items.
+4. [ ] Add `POST /admin/publish/:post_queue_id` endpoint for on-demand publish (mirrors /admin/refresh-brand pattern).
 
-**Day 7 done minimum = isolation test documented + onboarding CLI works + Hashtag IG token rotated to fresh 60-day. Day 8 builds publish path on top.**
+5. [ ] Smoke test: take the Day-6 Stack Overflow `post_queue_id` (`cab31b62-4b0b-4e95-b2d2-4e1feeba3840`), update `scheduled_for` to NOW(), trigger publisher, verify it publishes to `@agenciahashtag_` (or per dual-account routing).
+
+**Day 8 done = `/run-pipeline` produces a draft → cron picks it up at scheduled_for → publishes to IG → post_results row written with permalink. End-to-end live publish for Brand 0.**
 
 ## This week (Week 1 — rest of)
 
 - ~~Day 4 (Sat 2026-05-02): Writer + Editor + Spanish + QG + grounding-wired end-to-end.~~ ✅
 - ~~Day 5 (Sat 2026-05-02): Notion sync.~~ ✅ minimum done
 - ~~Day 6 (Sat 2026-05-02): Designer port.~~ ✅ done; multi-brand isolation deferred to Day 7
+- ~~Day 7 (Sat 2026-05-02): isolation + CLIs + runbook.~~ ✅ automatable portion done; rotation blocked on Ivan
 
 ## Next week (Week 2)
 
@@ -64,6 +79,9 @@ Multi-brand isolation test deferred to Day 7 AM (Designer was the bigger lift; s
 - **Cleanup task in n8n: remove plaintext API keys from Strategist/Writer/Editor Config nodes** (currently hardcoded as literals; should be in n8n credentials). Surfaced this session, not fixed yet — separate atomic session.
 - **Day 9 cleanup: dedicated read-only `content-agency-mvp-sync` Notion integration** scoped to the 8 shared agency DBs. Replaces the inherited Hashtag token currently in `NOTION_API_KEY`. Clean revoke path; principle of least privilege.
 - **Day 9 reliability: Postgres advisory lock around the 5-min sync scheduler** so multi-replica Railway deploys don't race. Today the scheduler is single-replica only; documented in D-014.
+- **Day 9 reliability: brand-correct theme fallback** when `brand_identity.themes` is empty. Today the fallback in `pickThemeColors()` (`src/pipeline/designer.ts`) hardcodes Hashtag's red/black + `HASHTAG AGENCIA` footer + `ivan@hashtag.com.mx`. Surfaced by Day 7 isolation test — Brand 1's slides showed Hashtag branding visually despite clean creative-inventory isolation. Fix: use `brand.name` for footer + neutral-default colors when no theme row exists.
+- **Day 9 reliability: recurring monthly IG-token verification agent.** The one-time agent on 2026-05-09 (`trig_017kbLj7ju1Q8Aq7d2WBh5c8`) catches Day 7 PM rotation. For ongoing operation, schedule a recurring monthly cron-based agent that runs `debug_token` for every active brand's encrypted token and alarms if any expire in <10 days. Cadence: 1st of each month, 9am CST.
+- **Test brand cleanup:** `testbrand` (id=`ace4d401-f56f-4b02-a55c-5250be0d1c89`) is archived but rows persist in `brands`, `brand_configs`, `post_queue` (1 row from isolation test). Safe to leave for forensic value; consider hard-delete once 90+ days post-MVP-launch.
 
 ## Decision-log triggers (add D-### to DECISIONS.md if any of these come up)
 

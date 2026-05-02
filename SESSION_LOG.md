@@ -5,6 +5,67 @@
 
 ---
 
+## 2026-05-02 CST — Session 7 (Day 7 automatable portion DONE — multi-brand isolation + onboarding/token CLIs + IG rotation runbook)
+
+**Duration:** ~2.5h. Sessions 4 → 5 → 6 → 7 ran back-to-back as one long marathon day.
+
+**What happened:**
+
+1. **Multi-brand isolation test** — inserted synthetic Brand 1 directly via Supabase REST: slug='testbrand', name='Test Brand (isolation)', notion_client_filter='TestClient', brand_identity={}. Triggered `POST /admin/refresh-brand/testbrand`.
+2. **Surfaced architectural finding (NOT a bug):** Notion data_sources query returns HTTP 400 with helpful "select option \"TestClient\" not found ... Available options: \"Hashtag\"." when the `Client` select option doesn't exist. Logged as the right contract — onboarding precondition is "create the Notion select option first." This shaped the onboarding-CLI design.
+3. **Pipeline run against Brand 1** (empty identity, sync skipped because it 400'd) reached `status='ready'` in 123s. Strategist picked Sonnet-improvised names: pillar `"Inteligencia de Mercado"` (NOT a Hashtag pillar) + recipe `"Death Data Carousel"` (NOT a Hashtag recipe). All Postgres IDs (`pillar_id`, `recipe_id`, `hook_id`, `cta_id`) were `null`. **Critical leak path proven structurally clean:** Brand 1's pipeline did not see any of Brand 0's curated inventory. brand_id-keyed reads from `brand_configs.brand_identity` work as designed.
+4. **Soft theme-leak finding** — Brand 1's rendered slides showed `HASHTAG AGENCIA` header/footer + `ivan@hashtag.com.mx` because `pickThemeColors()` in `src/pipeline/designer.ts` falls back to hardcoded Hashtag values when `brand_identity.themes` is empty. NOT a creative-inventory leak; visual-only. Logged for Day 9 reliability backlog (brand-correct theme fallback using `brand.name` for footer + neutral-default colors).
+5. **Onboarding CLI** (`scripts/onboard-brand.ts`, ~200 LOC) built with the Notion select-option preflight as Step 1:
+   - Step 1: query each of 8 DBs with `Active=true AND Client=<filter>`. If any returns 400, parse the helpful "Available options:" hint and tell Ivan exactly which DBs need the option added. Exit 3 (no DB mutations).
+   - Step 2: idempotent `brands` upsert (slug as unique key; on 23505 conflict, return existing).
+   - Step 3: idempotent `brand_configs` upsert (insert OR UPDATE notion_client_filter/ig fields; preserves existing brand_identity).
+   - Step 4: trigger `POST /admin/refresh-brand/:slug` against `MVP_SERVICE_URL` (default Railway prod).
+   - Tested both paths: `Hashtag` → all 8 DBs accept, idempotent re-run on Brand 0, sync 80 rows in 1.3s. `DoesNotExist` → all 8 DBs reject cleanly, prints fix instructions, exits 3.
+6. **Token-store CLI** (`scripts/store-ig-token.ts`, ~150 LOC):
+   - Brand lookup by slug.
+   - Graph API `debug_token` verify — enforces `is_valid=true` AND `daysFromNow(expires_at) >= 50`. Pass `--no-verify` to skip (rate-limit retry escape).
+   - AES-256-GCM encrypt via existing `crypto.ts` (D-008).
+   - UPDATE-only on `brand_configs.ig_token_encrypted` (+ optional ig_business_account_id, fb_page_id).
+   - Plaintext token never touches disk; only argv + memory.
+7. **IG rotation runbook** written (`runbooks/ig-token-rotation.md`):
+   - Step-by-step OAuth dance from Graph API Explorer → exchange short-lived → fetch long-lived Page token from `/me/accounts`.
+   - `debug_token` verify recipe.
+   - CLI invocation example.
+   - Common failure modes (wrong "User or Page" selection, short-lived skip, missing scopes, app dev mode).
+   - Cadence guidance — rotate at day 50 for 10-day safety margin.
+8. **testbrand archived** — set `brands.archived_at`, `status='paused'`, `brand_configs.notion_client_filter=NULL` so the 5-min cron sync skips it cleanly. Defense-in-depth (multiple checks would each independently exclude it).
+9. **D-011 actual rotation BLOCKED on Ivan running the runbook.** Manual OAuth + MFA. Cannot automate. Scheduled verification agent (`trig_017kbLj7ju1Q8Aq7d2WBh5c8`) fires 2026-05-09 09:00 CST and will read CREDENTIALS Rotation log + SESSION_LOG to confirm completion.
+
+**Day 7 done criterion** for the automatable scope met. The agency platform can now safely onboard a new brand with one CLI invocation (after the human has added the Notion select option). Token rotation is one CLI invocation away too — only the OAuth dance is human.
+
+**Lessons (some belong promoted to feedback memory eventually):**
+- **Failure-path testing surfaces real architecture findings.** I built the onboarding CLI with preflight INSTINCTIVELY because of the morning's Notion 400 surprise. If I'd skipped the isolation test (or only tested the happy path), I'd have shipped a CLI that fails opaquely on first onboarding for any new brand. The 30 min spent on the isolation test paid for the next 50 brands' onboardings.
+- **Soft visual leaks ≠ data leaks.** Brand 1's slides had Hashtag branding because the theme fallback is hardcoded. That's an embarrassment if shipped, but the data layer (creative inventory, IDs, brand_id) is clean. Naming this distinction publicly (in STATUS) prevents future-me from over-reacting and gold-plating Day 7 when the right move is "log for Day 9."
+- **The runbook IS the work.** I cannot rotate the token, but I can make rotation a 5-minute task instead of a 1-hour fumble. The runbook + CLI + verify-with-debug_token + 50-day floor is what de-risks BUG-S58-4 going forward. Schedule a recurring monthly verification agent post-MVP for ongoing protection.
+- **Schedule a verification agent for any human-blocking task with a real failure history.** Day 7 PM rotation is the most fragile dependency in the project (BUG-S58-4 is real, recent, painful). The 2026-05-09 one-time agent is the lowest-effort safeguard against forgetting.
+
+**External state changes:**
+- GitHub: 1 commit on main (`ed31557` Day 7 isolation + CLIs + runbook). State-docs commit pending.
+- Supabase: testbrand inserted (`ace4d401-f56f-4b02-a55c-5250be0d1c89`), then archived/paused/filter-cleared. brand_identity for testbrand stayed `{}`. One forensic post_queue row from the isolation test (`12d02e0b-134b-4a34-bdbe-ca5a467b9695`).
+- Railway: no new env vars. No deploys (CLIs are dev-tools; service code unchanged).
+- One more remote routine via /schedule earlier in the session: `trig_017kbLj7ju1Q8Aq7d2WBh5c8` MVP Day-7 IG token rotation verifier (one-shot 2026-05-09T15:00:00Z).
+
+**New decisions logged:** None new this session.
+
+**What's next:**
+- Hashtag IG token rotation (Ivan, Day 7 PM, runbook + CLI).
+- Day 8: IG Graph API publishing path. Hard precondition is the rotation. Resume with `[MVP] resume`.
+
+**Blockers:** Hashtag IG token rotation (Ivan-blocked).
+
+**Live verification:**
+- ✅ Onboarding CLI good-path: 80 rows synced for Hashtag in 1.3s, idempotent, exit 0.
+- ✅ Onboarding CLI fail-path: bad filter → all 8 DBs report rejection cleanly + fix instructions + exit 3, no Postgres mutations.
+- ✅ Multi-brand isolation: Brand 1 ran end-to-end without seeing any Brand 0 creative inventory (all Postgres IDs null in Brand 1's strategy).
+- ✅ testbrand archived; cron sync skips it.
+
+---
+
 ## 2026-05-02 CST — Session 6 (Day 6 DONE — Designer live, full chain ships designed carousels)
 
 **Duration:** ~3.5h. Sessions 4 → 5 → 6 ran back-to-back as one long day.
