@@ -272,8 +272,13 @@ async function runWriterWithGroundingLoop(params: {
     return { draft, grounding: undefined, terminal: 'continue' };
   }
 
-  // Mechanical grounding check
-  let grounding = verifyDraftGrounding(draftToSlices(draft), cp.anchor_claims);
+  // Mechanical grounding check — verify against the FULL source extraction
+  // (cp.source_claims), not Strategist's curated subset (cp.anchor_claims).
+  // Anchor_claims is the Writer's "stay focused" prompt input; source_claims is the
+  // full set of facts the source actually said. A draft that cites a real source
+  // number outside Strategist's 5-claim picks is grounded, not fabricated. QG Phase A
+  // (LLM verifier) still uses anchor_claims for the "should this post focus here" check.
+  let grounding = verifyDraftGrounding(draftToSlices(draft), cp.source_claims);
   if (grounding.verdict === 'pass') {
     return { draft, grounding, terminal: 'continue' };
   }
@@ -292,7 +297,7 @@ async function runWriterWithGroundingLoop(params: {
       rewrite_attempt: 1,
     })
   );
-  grounding = verifyDraftGrounding(draftToSlices(draft), cp.anchor_claims);
+  grounding = verifyDraftGrounding(draftToSlices(draft), cp.source_claims);
 
   // After the rewrite, anything not 'pass' is terminal kill (single-attempt budget).
   if (grounding.verdict !== 'pass') {
