@@ -73,6 +73,13 @@ export interface ExtractionResult {
     | 'rejected_extraction_failed';
   /** Human-readable note when status !== 'ok'. */
   note?: string;
+  /**
+   * Source text that backed the extraction (truncated to 14k chars).
+   * Used by pre-Phase-A grounding as the substring corpus when a draft cites a
+   * number that wasn't in the top-N extracted claims. NOT persisted to post_queue
+   * (chain strips it before status transitions to keep payload jsonb compact).
+   */
+  source_text?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

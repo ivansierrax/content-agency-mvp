@@ -79,28 +79,37 @@ interface DraftSlice {
 }
 
 /**
- * Verify every number found across draft slices is a member of anchor_claims.
+ * Verify every number found across draft slices is grounded.
  *
- * Caller is responsible for slicing the draft into labeled regions
- * (caption, each slide's headline/body/accent/data_card numbers, cta_text).
- * The function returns a verdict + offending list + telemetry stats.
+ * Two-tier membership check (D-012, fixed Day 4):
+ *   1. Fast set-lookup against `claims.numeric_claims` (extracted claims, top-N).
+ *   2. Fallback substring lookup against `source_text` (full extraction corpus,
+ *      up to 14KB), using the SAME normalize fn as the set lookup.
+ *
+ * Single normalize fn on BOTH sides of every comparison — BUG-S58-5 (asymmetric
+ * normalize) cannot recur. Source_text fallback handles numbers that didn't
+ * make the top-N cap but legitimately appear in source (years, secondary stats).
+ *
+ * Caller is responsible for slicing the draft into labeled regions.
  */
 export function verifyDraftGrounding(
   draftSlices: DraftSlice[],
-  anchor_claims: AnchorClaims
+  claims: AnchorClaims,
+  source_text?: string
 ): GroundingResult {
-  // Build the anchor membership set ONCE, using the SAME normalization
-  // we'll apply to needles. This is the BUG-S58-5 prevention pattern.
+  // Tier 1: fast set membership against extracted claims.
   const anchorSet = new Set<string>();
-  for (const claim of anchor_claims.numeric_claims) {
+  for (const claim of claims.numeric_claims) {
     const norm = normalizeForNumber(claim.value);
     if (norm) anchorSet.add(norm);
   }
 
-  // Also accept years that appear in source_meta.date (e.g. "2024") — these
-  // are publication dates and Writer is allowed to cite them as source attribution.
-  const dateMatch = anchor_claims.source_meta?.date?.match(/^(\d{4})/);
+  // Publication date year (e.g. "2024") — always allowed as source attribution.
+  const dateMatch = claims.source_meta?.date?.match(/^(\d{4})/);
   if (dateMatch?.[1]) anchorSet.add(dateMatch[1]);
+
+  // Tier 2: substring corpus from source_text, normalized once with the same fn.
+  const sourceCorpus = source_text ? normalizeForNumber(source_text) : '';
 
   const offending: GroundingResult['offending'] = [];
   let numbers_in_draft = 0;
@@ -113,16 +122,19 @@ export function verifyDraftGrounding(
       const needle = normalizeForNumber(num);
       if (needle.length < 1) continue; // skip un-normalizable
       if (anchorSet.has(needle) || [...anchorSet].some((a) => a.includes(needle) || needle.includes(a))) {
-        // Bidirectional substring match handles e.g. anchor "65000" vs draft "65,000" — both
-        // normalize to "65000", so .has() catches it. The substring fallback also catches
-        // partial-match cases like draft "13.0%" vs anchor "13%" (different precision).
+        // Tier 1 hit: bidirectional substring match handles e.g. anchor "65000" vs
+        // draft "65,000" — both normalize to "65000". Catches precision variants too.
+        anchored++;
+      } else if (sourceCorpus.length >= needle.length && sourceCorpus.includes(needle)) {
+        // Tier 2 hit: didn't make top-N claims but appears verbatim in source corpus.
+        // Same normalize fn on both sides → BUG-S58-5 immune.
         anchored++;
       } else {
         offending.push({
           source: slice.source,
           value: num,
           normalized: needle,
-          reason: 'not_in_anchor_claims.numeric_claims',
+          reason: source_text ? 'not_in_claims_or_source_text' : 'not_in_claims',
         });
       }
     }

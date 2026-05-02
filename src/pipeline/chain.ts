@@ -272,13 +272,13 @@ async function runWriterWithGroundingLoop(params: {
     return { draft, grounding: undefined, terminal: 'continue' };
   }
 
-  // Mechanical grounding check — verify against the FULL source extraction
-  // (cp.source_claims), not Strategist's curated subset (cp.anchor_claims).
-  // Anchor_claims is the Writer's "stay focused" prompt input; source_claims is the
-  // full set of facts the source actually said. A draft that cites a real source
-  // number outside Strategist's 5-claim picks is grounded, not fabricated. QG Phase A
-  // (LLM verifier) still uses anchor_claims for the "should this post focus here" check.
-  let grounding = verifyDraftGrounding(draftToSlices(draft), cp.source_claims);
+  // Mechanical grounding check — two-tier (D-012 + Day 4 fix):
+  //   tier 1: full extraction claims (cp.source_claims, not Strategist's anchor subset)
+  //   tier 2: source_text fallback for numbers outside top-N extraction cap
+  // Same normalize fn on both sides → BUG-S58-5 stays structurally impossible.
+  // QG Phase A (LLM verifier) still uses anchor_claims for "stay focused" contract.
+  const sourceText = envelope.extraction?.source_text;
+  let grounding = verifyDraftGrounding(draftToSlices(draft), cp.source_claims, sourceText);
   if (grounding.verdict === 'pass') {
     return { draft, grounding, terminal: 'continue' };
   }
@@ -297,7 +297,7 @@ async function runWriterWithGroundingLoop(params: {
       rewrite_attempt: 1,
     })
   );
-  grounding = verifyDraftGrounding(draftToSlices(draft), cp.source_claims);
+  grounding = verifyDraftGrounding(draftToSlices(draft), cp.source_claims, sourceText);
 
   // After the rewrite, anything not 'pass' is terminal kill (single-attempt budget).
   if (grounding.verdict !== 'pass') {
@@ -360,7 +360,12 @@ function defaultIdempotencyKey(brandSlug: string, topic: TopicInput): string {
 }
 
 function envelopeToPayload(env: PostEnvelope): Record<string, unknown> {
-  return env as unknown as Record<string, unknown>;
+  // Strip source_text from extraction before persisting — it can be ~14KB and
+  // adds zero forensic value past the chain run (we have the source_url).
+  // Keeps post_queue.payload jsonb compact across status transitions.
+  const out = JSON.parse(JSON.stringify(env)) as { extraction?: { source_text?: string } } & Record<string, unknown>;
+  if (out.extraction) delete out.extraction.source_text;
+  return out;
 }
 
 async function timed<T>(envelope: PostEnvelope, step: string, fn: () => Promise<T>): Promise<T> {

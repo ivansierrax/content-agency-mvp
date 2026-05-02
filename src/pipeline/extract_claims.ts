@@ -315,6 +315,7 @@ export async function extractClaims(params: ExtractClaimsParams): Promise<Extrac
     anchor_weight,
     dropped,
     status: 'ok',
+    source_text: sourceText.substring(0, 14000),
     ...(dropped.length > 0 && { note: `verified: dropped ${dropped.length} hallucinated claim(s) — see dropped[]` }),
   };
 }
