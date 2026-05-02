@@ -78,6 +78,7 @@ export interface BrandConfigRow {
   brand_identity: BrandIdentity;
   brand_identity_synced_at: string | null;
   brand_identity_source: BrandIdentitySource;
+  notion_client_filter: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -99,6 +100,7 @@ export interface BrandConfigInsert {
   client_approval_required?: boolean;
   brand_identity?: BrandIdentity;
   brand_identity_source?: BrandIdentitySource;
+  notion_client_filter?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

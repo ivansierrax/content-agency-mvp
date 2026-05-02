@@ -13,6 +13,12 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   MASTER_ENCRYPTION_KEY: string;
   PORT: number;
+  /** Notion integration token. Day 5+ brand sync. */
+  NOTION_API_KEY: string;
+  /** Notion API version. Pinned per data_sources query format. */
+  NOTION_VERSION: string;
+  /** Optional shared secret for /admin/* endpoints. If unset, admin endpoints are open. */
+  ADMIN_TOKEN?: string;
 }
 
 function required(name: string): string {
@@ -44,5 +50,10 @@ export function loadEnv(): Env {
     ANTHROPIC_API_KEY: required('ANTHROPIC_API_KEY'),
     MASTER_ENCRYPTION_KEY: required('MASTER_ENCRYPTION_KEY'),
     PORT: Number(optional('PORT', '3000')),
+    NOTION_API_KEY: required('NOTION_API_KEY'),
+    NOTION_VERSION: optional('NOTION_VERSION', '2025-09-03'),
+    ...(process.env.ADMIN_TOKEN && process.env.ADMIN_TOKEN.trim() !== ''
+      ? { ADMIN_TOKEN: process.env.ADMIN_TOKEN }
+      : {}),
   };
 }

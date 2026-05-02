@@ -18,6 +18,9 @@ import { checkDbHealth } from './lib/supabase.js';
 import { getBrandBySlug, listBrands } from './db/brands.js';
 import { extractClaims } from './pipeline/extract_claims.js';
 import { runChain } from './pipeline/chain.js';
+import { syncBrandIdentity } from './sync/notion-brand.js';
+import { startScheduler, stopScheduler } from './sync/scheduler.js';
+import { getAdminClient } from './lib/supabase.js';
 import type { TopicInput } from './pipeline/types.js';
 
 const env = loadEnv();
@@ -167,6 +170,88 @@ async function handleRunPipeline(req: IncomingMessage, res: ServerResponse): Pro
   }, null, 2));
 }
 
+/**
+ * On-demand Notion → Postgres sync for ONE brand.
+ *
+ * Path: POST /admin/refresh-brand/:slug
+ *   - 404 if brand or brand_config not found
+ *   - 422 if brand_config.notion_client_filter is null (set during onboarding)
+ *   - 200 with sync result on success
+ *
+ * Auth: if env.ADMIN_TOKEN is set, requires `Authorization: Bearer <token>`.
+ *       If unset, endpoint is open (acceptable for MVP single-tenant ops).
+ */
+async function handleRefreshBrand(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (env.ADMIN_TOKEN) {
+    const auth = req.headers.authorization ?? '';
+    const expected = `Bearer ${env.ADMIN_TOKEN}`;
+    if (auth !== expected) {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'unauthorized' }));
+      return;
+    }
+  }
+
+  const path = (req.url ?? '').split('?')[0] ?? '';
+  const slug = path.replace(/^\/admin\/refresh-brand\//, '');
+  if (!slug) {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'missing_slug' }));
+    return;
+  }
+
+  const brand = await getBrandBySlug(slug);
+  if (!brand) {
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'brand_not_found', slug }));
+    return;
+  }
+
+  const { data: cfg, error: cfgErr } = await getAdminClient()
+    .from('brand_configs')
+    .select('notion_client_filter')
+    .eq('brand_id', brand.id)
+    .maybeSingle();
+  if (cfgErr) {
+    res.writeHead(500, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'brand_config_read', detail: cfgErr.message }));
+    return;
+  }
+  const filter = (cfg as { notion_client_filter: string | null } | null)?.notion_client_filter;
+  if (!filter) {
+    res.writeHead(422, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'notion_client_filter_unset',
+      hint: `Set brand_configs.notion_client_filter for brand_id=${brand.id} to the Notion 'Client' select-option name.`,
+    }));
+    return;
+  }
+
+  setBrandContext(brand.id, brand.slug);
+  const start = Date.now();
+  try {
+    const result = await syncBrandIdentity({
+      brand_id: brand.id,
+      brand_slug: brand.slug,
+      notion_client_filter: filter,
+    });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ...result, elapsed_ms: Date.now() - start }, null, 2));
+  } catch (err) {
+    captureException(err, { source: 'admin-refresh-brand', slug });
+    res.writeHead(502, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'notion_sync_failed',
+      detail: (err as Error).message.substring(0, 500),
+    }));
+  }
+}
+
+// Path-prefix matcher for /admin/refresh-brand/:slug
+function isRefreshBrandPath(method: string, path: string): boolean {
+  return method === 'POST' && path.startsWith('/admin/refresh-brand/');
+}
+
 const routes: Route[] = [
   { method: 'GET', path: '/', handler: handleRoot },
   { method: 'GET', path: '/health', handler: handleHealth },
@@ -175,8 +260,21 @@ const routes: Route[] = [
 ];
 
 const server = createServer(async (req, res) => {
-  const path = (req.url ?? '/').split('?')[0];
+  const path = (req.url ?? '/').split('?')[0] ?? '/';
   const method = req.method ?? 'GET';
+
+  // Prefix-matched routes (must be checked before exact match)
+  if (isRefreshBrandPath(method, path)) {
+    try {
+      await handleRefreshBrand(req, res);
+    } catch (err) {
+      captureException(err, { source: 'route-handler', path, method });
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'internal' }));
+    }
+    return;
+  }
+
   const route = routes.find((r) => r.method === method && r.path === path);
   if (!route) {
     res.writeHead(404, { 'content-type': 'application/json' });
@@ -199,11 +297,20 @@ server.listen(PORT, () => {
     nodeVersion: process.version,
     sentryEnabled: Boolean(env.SENTRY_DSN),
   });
+
+  // Day 5: kick off the 5-min Notion sync scheduler. Runs immediately on boot,
+  // then every 5 min ±60s jitter. Per-brand error isolation lives in syncAllBrands.
+  // SCHEDULER_DISABLED=1 turns it off (useful for tests).
+  if (process.env.SCHEDULER_DISABLED !== '1') {
+    startScheduler();
+    console.log('[content_agency_mvp] notion sync scheduler started');
+  }
 });
 
 // Graceful shutdown — Railway sends SIGTERM on redeploy.
 async function shutdown(signal: string): Promise<void> {
   console.log(`[content_agency_mvp] ${signal} received, shutting down...`);
+  stopScheduler();
   server.close(() => {
     console.log('[content_agency_mvp] server closed');
   });
